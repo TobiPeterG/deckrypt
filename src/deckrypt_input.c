@@ -11,6 +11,8 @@
 #include <sys/time.h>
 #include <unistd.h>
 #include <libevdev/libevdev.h>
+#include <signal.h>
+#include <sys/select.h>
 
 #include "uitype.h"
 
@@ -369,6 +371,17 @@ static bool find_device(struct libevdev **device)
 static volatile bool terminate = false;
 static void signal_handler(int signum) { terminate = true; }
 
+void setup_signal_handlers()
+{
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sa.sa_flags = 0;  // No special flags
+    sigemptyset(&sa.sa_mask);
+
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+}
+
 void parse_arguments(int argc, char *argv[])
 {
     int opt;
@@ -402,50 +415,81 @@ int main(int argc, char *argv[])
         return 1;
     };
 
-    signal(SIGINT, signal_handler);
-    signal(SIGTERM, signal_handler);
+    setup_signal_handlers();  // Setup signal handling
 
     struct libevdev *device = NULL;
-    while (true)
+    int fd;
+    
+    while (!terminate)
     {
-        if (terminate)
-            break;
-
         if (device == NULL)
         {
-            if (!find_device(&device))
+            if (!find_device(&device)) // find_device opens the device
             {
                 usleep(100000); // Sleep for 100 milliseconds before trying again
+            }
+            else
+            {
+                fd = libevdev_get_fd(device); // Get file descriptor of the device
             }
         }
         else
         {
-            struct input_event ev;
-            int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_BLOCKING, &ev);
-            if (verbose) printf("Event received: %d\n", rc);
-            if (rc == 0)
+            // Use pselect to wait for either an event on the file descriptor or a signal
+            fd_set read_fds;
+            FD_ZERO(&read_fds);
+            FD_SET(fd, &read_fds);
+
+            struct timespec timeout;
+            timeout.tv_sec = 0;
+            timeout.tv_nsec = 100000000; // 10ms
+
+            int result = pselect(fd + 1, &read_fds, NULL, NULL, &timeout, NULL);
+
+            if (result == -1)
             {
-                switch (ev.type)
+                if (errno == EINTR) // Interrupted by signal
                 {
-                case EV_KEY:
-                    if (ev.value == 0)
-                    {
-                        if (ev.code == ENTER_BUTTON)
-                        {
-                            uitype_enter();
-                        }
-                        else if (ev.code == CLEAR_BUTTON)
-                        {
-                            uitype_ctrlu();
-                        }
-                    }
-                    handle_button(&ev);
-                    break;
-                case EV_ABS:
-                    handle_axis(&ev);
+                    if (terminate)
+                        break;
+                }
+                else
+                {
+                    perror("pselect failed");
                     break;
                 }
-                usleep(10000);
+            }
+            else if (result > 0 && FD_ISSET(fd, &read_fds))
+            {
+                struct input_event ev;
+                int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_BLOCKING, &ev);
+
+                if (verbose) printf("Event received: %d\n", rc);
+
+                if (rc == 0)
+                {
+                    switch (ev.type)
+                    {
+                    case EV_KEY:
+                        if (ev.value == 0)
+                        {
+                            if (ev.code == ENTER_BUTTON)
+                            {
+                                uitype_enter();
+                            }
+                            else if (ev.code == CLEAR_BUTTON)
+                            {
+                                uitype_ctrlu();
+                            }
+                        }
+                        handle_button(&ev);
+                        break;
+                    case EV_ABS:
+                        handle_axis(&ev);
+                        break;
+                    }
+                    usleep(10000); // Avoid high CPU usage
+                }
             }
         }
     }
