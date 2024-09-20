@@ -1,6 +1,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -18,6 +19,8 @@
 
 // Set this to fit the longest name in the buttons struct below
 #define MAX_NAME_LEN 5
+
+static bool verbose = false;
 
 typedef struct Button
 {
@@ -231,7 +234,7 @@ static void handle_button(struct input_event *ev)
     Button *button = button_from_code(ev->code);
     if (button == NULL)
     {
-        printf("Warning: Unknown button code %d\n", ev->code);
+        if (verbose) printf("Warning: Unknown button code %d\n", ev->code);
         return;
     }
 
@@ -299,7 +302,7 @@ static void handle_axis(struct input_event *ev)
                 }
                 else
                 {
-                    printf("Warning: Unknown axis code %d\n", ev->code);
+                    if (verbose) printf("Warning: Unknown axis code %d\n", ev->code);
                 }
             }
             break;
@@ -317,7 +320,7 @@ static bool find_device(struct libevdev **device)
     struct dirent **namelist;
     int n_devices = scandir("/dev/input/", &namelist, is_event_device, NULL);
 
-    printf("Number of devices found: %d\n", n_devices);
+    if (verbose) printf("Number of devices found: %d\n", n_devices);
 
     for (int i = 0; i < n_devices; i++)
     {
@@ -325,14 +328,14 @@ static bool find_device(struct libevdev **device)
                                    sizeof(char));
         sprintf(device_path, "%s%s", "/dev/input/", namelist[i]->d_name);
 
-        printf("Trying device: %s\n", device_path);
+        if (verbose) printf("Trying device: %s\n", device_path);
 
         int fd = open(device_path, O_RDONLY);
         free(device_path);
 
         if (libevdev_new_from_fd(fd, device) == 0)
         {
-            printf("Device name: %s\n", libevdev_get_name(*device));
+            if (verbose) printf("Device name: %s\n", libevdev_get_name(*device));
 
             if (libevdev_has_event_code(*device, EV_KEY, BTN_SOUTH))
             {
@@ -346,7 +349,7 @@ static bool find_device(struct libevdev **device)
             }
             else
             {
-                printf("No gamepad buttons found on this device.\n");
+                if (verbose) printf("No gamepad buttons found on this device.\n");
                 libevdev_free(*device);
                 *device = NULL;
             }
@@ -359,15 +362,39 @@ static bool find_device(struct libevdev **device)
         free(namelist[i]);
     }
     free(namelist);
-    printf("No suitable device found.\n");
+    if (verbose) printf("No suitable device found.\n");
     return false;
 }
 
 static volatile bool terminate = false;
 static void signal_handler(int signum) { terminate = true; }
 
-int main()
+void parse_arguments(int argc, char *argv[])
 {
+    int opt;
+    struct option long_options[] = {
+        {"verbose", no_argument, 0, 'v'},
+        {0, 0, 0, 0}
+    };
+
+    while ((opt = getopt_long(argc, argv, "v", long_options, NULL)) != -1)
+    {
+        switch (opt)
+        {
+        case 'v':
+            verbose = true;
+            break;
+        default:
+            fprintf(stderr, "Usage: %s [-v|--verbose]\n", argv[0]);
+            exit(EXIT_FAILURE);
+        }
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    parse_arguments(argc, argv);
+
     gettimeofday(&start_time, NULL);
 
     if (uitype_init() != 0)
@@ -395,7 +422,7 @@ int main()
         {
             struct input_event ev;
             int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_BLOCKING, &ev);
-            printf("Event received: %d\n", rc);
+            if (verbose) printf("Event received: %d\n", rc);
             if (rc == 0)
             {
                 switch (ev.type)
