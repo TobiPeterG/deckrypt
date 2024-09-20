@@ -388,7 +388,7 @@ int main()
         {
             if (!find_device(&device))
             {
-                usleep(100000); // Sleep for 500 milliseconds before trying again
+                usleep(100000); // Sleep for 100 milliseconds before trying again
             }
         }
         else
@@ -418,6 +418,7 @@ int main()
                     handle_axis(&ev);
                     break;
                 }
+                usleep(10000);
             }
         }
     }
