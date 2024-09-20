@@ -395,6 +395,7 @@ int main()
         {
             struct input_event ev;
             int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_BLOCKING, &ev);
+            printf("Event received: %d\n", rc);
             if (rc == 0)
             {
                 switch (ev.type)
