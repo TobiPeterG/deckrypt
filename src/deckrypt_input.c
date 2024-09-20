@@ -70,10 +70,32 @@ static Button buttons[] = {
     { .code = 0xffff,      .name = "R-LE",  .pressed = false },
     { .code = 0xffff,      .name = "R-UP",  .pressed = false },
     { .code = 0xffff,      .name = "R-DO",  .pressed = false },
+    // Support Gamepads
+    { .code = BTN_SOUTH,   .name = "A",      .pressed = false },
+    { .code = BTN_EAST,    .name = "B",      .pressed = false },
+    { .code = BTN_NORTH,   .name = "X",      .pressed = false },
+    { .code = BTN_WEST,    .name = "Y",      .pressed = false },
+    { .code = BTN_TL,      .name = "LB",     .pressed = false },
+    { .code = BTN_TR,      .name = "RB",     .pressed = false },
+    { .code = BTN_SELECT,  .name = "SEL",    .pressed = false },
+    { .code = BTN_START,   .name = "START",  .pressed = false },
+    { .code = BTN_MODE,    .name = "MODE",   .pressed = false },
+    { .code = BTN_THUMBL,  .name = "LTHMB",  .pressed = false },
+    { .code = BTN_THUMBR,  .name = "RTHMB",  .pressed = false },
 };
 
 static Axis axes[] = {
     {
+        .code = ABS_RX,
+        .nameX = "R-LE", .nameY = "R-RI",
+        .valueX = -32768, .value0 = 0, .valueY = 32767
+    },
+    {
+        .code = ABS_RY,
+        .nameX = "R-UP", .nameY = "R-DO",
+        .valueX = -32768, .value0 = 0, .valueY = 32767
+    },
+        {
         .code = ABS_HAT0X,
         .nameX = "D-LE", .nameY = "D-RI",
         .valueX = -1, .value0 = 0, .valueY = 1
@@ -86,23 +108,33 @@ static Axis axes[] = {
     {
         .code = ABS_X,
         .nameX = "L-LE", .nameY = "L-RI",
-        .valueX = 0, .value0 = 128, .valueY = 255
+        .valueX = -32768, .value0 = 0, .valueY = 32767
     },
     {
         .code = ABS_Y,
         .nameX = "L-UP", .nameY = "L-DO",
-        .valueX = 0, .value0 = 128, .valueY = 255
+        .valueX = -32768, .value0 = 0, .valueY = 32767
+    },
+    {
+        .code = ABS_RX,
+        .nameX = "R-LE", .nameY = "R-RI",
+        .valueX = -32768, .value0 = 0, .valueY = 32767
+    },
+    {
+        .code = ABS_RY,
+        .nameX = "R-UP", .nameY = "R-DO",
+        .valueX = -32768, .value0 = 0, .valueY = 32767
     },
     {
         .code = ABS_Z,
-        .nameX = "R-LE", .nameY = "R-RI",
+        .nameX = "L-TRIG", .nameY = "R-RI",  // Analog trigger axis
         .valueX = 0, .value0 = 128, .valueY = 255
     },
     {
         .code = ABS_RZ,
-        .nameX = "R-UP", .nameY = "R-DO",
+        .nameX = "R-TRIG", .nameY = "R-DO",  // Analog trigger axis
         .valueX = 0, .value0 = 128, .valueY = 255
-    },
+    }
 };
 
 static const size_t n_buttons = sizeof(buttons) / sizeof(Button);
