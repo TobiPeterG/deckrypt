@@ -327,7 +327,7 @@ static bool find_device(struct libevdev **device)
 
         printf("Trying device: %s\n", device_path);
 
-        int fd = open(device_path, O_RDONLY | O_NONBLOCK);
+        int fd = open(device_path, O_RDONLY);
         free(device_path);
 
         if (libevdev_new_from_fd(fd, device) == 0)
@@ -375,22 +375,26 @@ int main()
         return 1;
     };
 
+    signal(SIGINT, signal_handler);
+    signal(SIGTERM, signal_handler);
+
     struct libevdev *device = NULL;
     while (true)
     {
-        signal(SIGINT, signal_handler);
-        signal(SIGTERM, signal_handler);
         if (terminate)
             break;
 
         if (device == NULL)
         {
-            find_device(&device);
+            if (!find_device(&device))
+            {
+                usleep(100000); // Sleep for 500 milliseconds before trying again
+            }
         }
         else
         {
             struct input_event ev;
-            int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_NORMAL, &ev);
+            int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_BLOCKING, &ev);
             if (rc == 0)
             {
                 switch (ev.type)
