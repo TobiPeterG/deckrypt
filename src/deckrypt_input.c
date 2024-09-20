@@ -1,7 +1,7 @@
+#include <pthread.h>
 #include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
-#include <getopt.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -10,9 +10,8 @@
 #include <string.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <getopt.h>
 #include <libevdev/libevdev.h>
-#include <signal.h>
-#include <sys/select.h>
 
 #include "uitype.h"
 
@@ -236,7 +235,8 @@ static void handle_button(struct input_event *ev)
     Button *button = button_from_code(ev->code);
     if (button == NULL)
     {
-        if (verbose) printf("Warning: Unknown button code %d\n", ev->code);
+        if (verbose)
+            printf("Warning: Unknown button code %d\n", ev->code);
         return;
     }
 
@@ -304,7 +304,8 @@ static void handle_axis(struct input_event *ev)
                 }
                 else
                 {
-                    if (verbose) printf("Warning: Unknown axis code %d\n", ev->code);
+                    if (verbose)
+                        printf("Warning: Unknown axis code %d\n", ev->code);
                 }
             }
             break;
@@ -322,7 +323,8 @@ static bool find_device(struct libevdev **device)
     struct dirent **namelist;
     int n_devices = scandir("/dev/input/", &namelist, is_event_device, NULL);
 
-    if (verbose) printf("Number of devices found: %d\n", n_devices);
+    if (verbose)
+        printf("Number of devices found: %d\n", n_devices);
 
     for (int i = 0; i < n_devices; i++)
     {
@@ -330,14 +332,16 @@ static bool find_device(struct libevdev **device)
                                    sizeof(char));
         sprintf(device_path, "%s%s", "/dev/input/", namelist[i]->d_name);
 
-        if (verbose) printf("Trying device: %s\n", device_path);
+        if (verbose)
+            printf("Trying device: %s\n", device_path);
 
         int fd = open(device_path, O_RDONLY);
         free(device_path);
 
         if (libevdev_new_from_fd(fd, device) == 0)
         {
-            if (verbose) printf("Device name: %s\n", libevdev_get_name(*device));
+            if (verbose)
+                printf("Device name: %s\n", libevdev_get_name(*device));
 
             if (libevdev_has_event_code(*device, EV_KEY, BTN_SOUTH))
             {
@@ -351,7 +355,8 @@ static bool find_device(struct libevdev **device)
             }
             else
             {
-                if (verbose) printf("No gamepad buttons found on this device.\n");
+                if (verbose)
+                    printf("No gamepad buttons found on this device.\n");
                 libevdev_free(*device);
                 *device = NULL;
             }
@@ -364,20 +369,25 @@ static bool find_device(struct libevdev **device)
         free(namelist[i]);
     }
     free(namelist);
-    if (verbose) printf("No suitable device found.\n");
+    if (verbose)
+        printf("No suitable device found.\n");
     return false;
 }
 
-static volatile bool terminate = false;
-static void signal_handler(int signum) { terminate = true; }
+static volatile sig_atomic_t terminate = 0;
 
-void setup_signal_handlers()
+void signal_handler(int sig)
 {
+    terminate = 1; // Set flag to terminate
+}
+
+void setup_signal_handling()
+{
+    // Set up signal handling
     struct sigaction sa;
     sa.sa_handler = signal_handler;
-    sa.sa_flags = 0;  // No special flags
     sigemptyset(&sa.sa_mask);
-
+    sa.sa_flags = 0;
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
 }
@@ -387,8 +397,7 @@ void parse_arguments(int argc, char *argv[])
     int opt;
     struct option long_options[] = {
         {"verbose", no_argument, 0, 'v'},
-        {0, 0, 0, 0}
-    };
+        {0, 0, 0, 0}};
 
     while ((opt = getopt_long(argc, argv, "v", long_options, NULL)) != -1)
     {
@@ -407,24 +416,31 @@ void parse_arguments(int argc, char *argv[])
 int main(int argc, char *argv[])
 {
     parse_arguments(argc, argv);
-
     gettimeofday(&start_time, NULL);
 
     if (uitype_init() != 0)
     {
         return 1;
-    };
+    }
 
-    setup_signal_handlers();  // Setup signal handling
+    setup_signal_handling(); // Setup signal handling for SIGINT and SIGTERM
 
     struct libevdev *device = NULL;
     int fd;
-    
+
+    sigset_t sigset;
+    sigemptyset(&sigset);
+    sigaddset(&sigset, SIGINT);
+    sigaddset(&sigset, SIGTERM);
+
+    // Block signals in this thread so we can catch them in pselect
+    pthread_sigmask(SIG_BLOCK, &sigset, NULL);
+
     while (!terminate)
     {
         if (device == NULL)
         {
-            if (!find_device(&device)) // find_device opens the device
+            if (!find_device(&device))
             {
                 usleep(100000); // Sleep for 100 milliseconds before trying again
             }
@@ -435,7 +451,6 @@ int main(int argc, char *argv[])
         }
         else
         {
-            // Use pselect to wait for either an event on the file descriptor or a signal
             fd_set read_fds;
             FD_ZERO(&read_fds);
             FD_SET(fd, &read_fds);
@@ -444,7 +459,8 @@ int main(int argc, char *argv[])
             timeout.tv_sec = 0;
             timeout.tv_nsec = 100000000; // 10ms
 
-            int result = pselect(fd + 1, &read_fds, NULL, NULL, &timeout, NULL);
+            // Use pselect to wait for an event or signal
+            int result = pselect(fd + 1, &read_fds, NULL, NULL, &timeout, &sigset);
 
             if (result == -1)
             {
@@ -464,7 +480,8 @@ int main(int argc, char *argv[])
                 struct input_event ev;
                 int rc = libevdev_next_event(device, LIBEVDEV_READ_FLAG_BLOCKING, &ev);
 
-                if (verbose) printf("Event received: %d\n", rc);
+                if (verbose)
+                    printf("Event received: %d\n", rc);
 
                 if (rc == 0)
                 {
