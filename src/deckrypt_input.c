@@ -158,6 +158,10 @@ static int64_t time2millis(struct timeval t) {
 
 static Button* button_from_code(uint16_t code) {
     for (size_t i = 0; i < n_buttons; i++) {
+        if (i >= n_buttons) {
+            printf("Error: Out of bounds access in button array.\n");
+            return NULL;
+        }
         if (code == buttons[i].code) {
             return &buttons[i];
         }
@@ -167,6 +171,10 @@ static Button* button_from_code(uint16_t code) {
 
 static Button* button_from_name(char *name) {
     for (size_t i = 0; i < n_buttons; i++) {
+        if (i >= n_buttons) {
+            printf("Error: Out of bounds access in button array.\n");
+            return NULL;
+        }
         if (strncmp(name, buttons[i].name, MAX_NAME_LEN) == 0) {
             return &buttons[i];
         }
@@ -178,6 +186,7 @@ static Button* button_from_name(char *name) {
 static void combination(Button *b) {
     char buffer[n_buttons * (MAX_NAME_LEN + 1)];
     buffer[0] = '\0';
+    
     // Check for hold-buttons
     // A button becomes a hold-button if it
     // * is pressed for at least the threshold time, and
@@ -195,32 +204,30 @@ static void combination(Button *b) {
             }
         }
     }
+
     if (strnlen(buffer, 1) == 0) {
         strcat(buffer, b->name);
-    }
-    else {
+    } else {
         strcat(buffer, "+");
         strcat(buffer, b->name);
     }
 
-    strcat(buffer, ";");
+    strcat(buffer, "-");
     uitype_type(buffer);
 }
 
 static void handle_button(struct input_event *ev) {
     Button *button = button_from_code(ev->code);
     if (button == NULL) {
-        printf("Unrecognized button code: %d\n", ev->code);  // Add this line
+        printf("Warning: Unknown button code %d\n", ev->code);
         return;
     }
 
     if (ev->value == 1) {
-        printf("Button pressed: %s\n", button->name);
         button->pressed = true;
         button->time_pressed = time2millis(ev->time);
     }
     else if (ev->value == 0) {
-        printf("Button released: %s\n", button->name);
         button->pressed = false;
         button->time_released = time2millis(ev->time);
         if (button->time_released - button->time_pressed < THRESHOLD) {
@@ -264,16 +271,24 @@ static int is_event_device(const struct dirent *dir) {
 static bool find_device(struct libevdev** device) {
     struct dirent **namelist;
     int n_devices = scandir("/dev/input/", &namelist, is_event_device, NULL);
+    
+    printf("Number of devices found: %d\n", n_devices);
+
     for (int i = 0; i < n_devices; i++) {
         char *device_path = calloc(strlen("/dev/input/") + namelist[i]->d_reclen + 1,
                 sizeof(char));
         sprintf(device_path, "%s%s", "/dev/input/", namelist[i]->d_name);
 
+        printf("Trying device: %s\n", device_path);
+
         int fd = open(device_path, O_RDONLY|O_NONBLOCK);
         free(device_path);
 
         if (libevdev_new_from_fd(fd, device) == 0) {
+            printf("Device name: %s\n", libevdev_get_name(*device));
+
             if (libevdev_has_event_code(*device, EV_KEY, BTN_SOUTH)) {
+                printf("Gamepad detected: %s\n", libevdev_get_name(*device));
                 for (int j = i; j < n_devices; j++) {
                     free(namelist[j]);
                 }
@@ -281,16 +296,21 @@ static bool find_device(struct libevdev** device) {
                 return true;
             }
             else {
+                printf("No gamepad buttons found on this device.\n");
                 libevdev_free(*device);
                 *device = NULL;
             }
+        } else {
+            printf("Failed to open device: %s\n", namelist[i]->d_name);
         }
         close(fd);
         free(namelist[i]);
     }
     free(namelist);
+    printf("No suitable device found.\n");
     return false;
 }
+
 
 
 static volatile bool terminate = false;
