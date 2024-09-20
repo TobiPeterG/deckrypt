@@ -72,6 +72,8 @@ static Button buttons[] = {
     {.code = 0xffff, .name = "R-LE", .pressed = false},
     {.code = 0xffff, .name = "R-UP", .pressed = false},
     {.code = 0xffff, .name = "R-DO", .pressed = false},
+    {.code = 0xffff, .name = "L-TRIG", .pressed = false},
+    {.code = 0xffff, .name = "R-TRIG", .pressed = false},
     // Support Gamepads
     {.code = BTN_SOUTH, .name = "A", .pressed = false},
     {.code = BTN_EAST, .name = "B", .pressed = false},
@@ -87,30 +89,6 @@ static Button buttons[] = {
 };
 
 static Axis axes[] = {
-    {.code = ABS_RX,
-     .nameX = "R-LE",
-     .nameY = "R-RI",
-     .valueX = -32768,
-     .value0 = 0,
-     .valueY = 32767},
-    {.code = ABS_RY,
-     .nameX = "R-UP",
-     .nameY = "R-DO",
-     .valueX = -32768,
-     .value0 = 0,
-     .valueY = 32767},
-    {.code = ABS_HAT0X,
-     .nameX = "D-LE",
-     .nameY = "D-RI",
-     .valueX = -1,
-     .value0 = 0,
-     .valueY = 1},
-    {.code = ABS_HAT0Y,
-     .nameX = "D-UP",
-     .nameY = "D-DO",
-     .valueX = -1,
-     .value0 = 0,
-     .valueY = 1},
     {.code = ABS_X,
      .nameX = "L-LE",
      .nameY = "L-RI",
@@ -123,6 +101,12 @@ static Axis axes[] = {
      .valueX = -32768,
      .value0 = 0,
      .valueY = 32767},
+    {.code = ABS_Z,
+     .nameX = "L-TRIG", // Left trigger
+     .nameY = "",       // No associated button for Y-axis on this axis
+     .valueX = 0,
+     .value0 = 128,
+     .valueY = 255},
     {.code = ABS_RX,
      .nameX = "R-LE",
      .nameY = "R-RI",
@@ -135,18 +119,24 @@ static Axis axes[] = {
      .valueX = -32768,
      .value0 = 0,
      .valueY = 32767},
-    {.code = ABS_Z,
-     .nameX = "L-TRIG",
-     .nameY = "R-RI", // Analog trigger axis
+    {.code = ABS_RZ,
+     .nameX = "R-TRIG", // Right trigger
+     .nameY = "",       // No associated button for Y-axis on this axis
      .valueX = 0,
      .value0 = 128,
      .valueY = 255},
-    {.code = ABS_RZ,
-     .nameX = "R-TRIG",
-     .nameY = "R-DO", // Analog trigger axis
-     .valueX = 0,
-     .value0 = 128,
-     .valueY = 255}};
+    {.code = ABS_HAT0X,
+     .nameX = "D-LE",
+     .nameY = "D-RI",
+     .valueX = -1,
+     .value0 = 0,
+     .valueY = 1},
+    {.code = ABS_HAT0Y,
+     .nameX = "D-UP",
+     .nameY = "D-DO",
+     .valueX = -1,
+     .value0 = 0,
+     .valueY = 1}};
 
 static const size_t n_buttons = sizeof(buttons) / sizeof(Button);
 static const size_t n_axes = sizeof(axes) / sizeof(Axis);
@@ -263,20 +253,33 @@ static void handle_button(struct input_event *ev)
 
 static void handle_axis(struct input_event *ev)
 {
-    static bool axis_locked = false;
-    
+    static bool axis_locked = false;   // Tracks whether the axis is in use
+    static Button *last_button = NULL; // Tracks the last button pressed from the axis
+
     for (size_t i = 0; i < n_axes; i++)
     {
         if (ev->code == axes[i].code)
         {
-            if (ev->value == axes[i].value0)
+            if (ev->value == axes[i].value0) // Axis has returned to neutral (value0)
             {
-                axis_locked = false;
+                axis_locked = false; // Unlock the axis
+                if (last_button != NULL && last_button->pressed)
+                {
+                    // Release the button that was pressed
+                    last_button->pressed = false;
+                    last_button->time_released = time2millis(ev->time);
+                    if (last_button->time_released - last_button->time_pressed < THRESHOLD)
+                    {
+                        combination(last_button);
+                    }
+                    last_button = NULL; // Reset the last button
+                }
             }
-            else if (!axis_locked)
+            else if (!axis_locked) // Axis has moved, and it is not locked
             {
                 Button *button = NULL;
 
+                // Check if moving along the X or Y axis
                 if (ev->value == axes[i].valueX)
                 {
                     button = button_from_name(axes[i].nameX);
@@ -288,16 +291,17 @@ static void handle_axis(struct input_event *ev)
 
                 if (button != NULL)
                 {
+                    // Register the button press
                     button->pressed = true;
                     button->time_pressed = time2millis(ev->time);
-                    axis_locked = true;
+                    axis_locked = true;   // Lock the axis to prevent further presses until released
+                    last_button = button; // Track the last button pressed from the axis
                 }
                 else
                 {
                     printf("Warning: Unknown axis code %d\n", ev->code);
                 }
             }
-
             break;
         }
     }
