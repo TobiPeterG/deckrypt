@@ -488,7 +488,7 @@ int main(int argc, char *argv[])
                         handle_axis(&ev);
                         break;
                     }
-                    usleep(10000); // Avoid high CPU usage
+                    usleep(50000); // Avoid high CPU usage
                 }
             }
         }
