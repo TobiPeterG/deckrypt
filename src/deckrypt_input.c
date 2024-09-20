@@ -209,13 +209,18 @@ static void combination(Button *b) {
 
 static void handle_button(struct input_event *ev) {
     Button *button = button_from_code(ev->code);
-    if (button == NULL) return;
+    if (button == NULL) {
+        printf("Unrecognized button code: %d\n", ev->code);  // Add this line
+        return;
+    }
 
     if (ev->value == 1) {
+        printf("Button pressed: %s\n", button->name);
         button->pressed = true;
         button->time_pressed = time2millis(ev->time);
     }
     else if (ev->value == 0) {
+        printf("Button released: %s\n", button->name);
         button->pressed = false;
         button->time_released = time2millis(ev->time);
         if (button->time_released - button->time_pressed < THRESHOLD) {
@@ -268,7 +273,7 @@ static bool find_device(struct libevdev** device) {
         free(device_path);
 
         if (libevdev_new_from_fd(fd, device) == 0) {
-            if (libevdev_has_event_code(*device, EV_KEY, ENTER_BUTTON)) {
+            if (libevdev_has_event_code(*device, EV_KEY, BTN_SOUTH)) {
                 for (int j = i; j < n_devices; j++) {
                     free(namelist[j]);
                 }
