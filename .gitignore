@@ -1,5 +1,5 @@
-/deckrypt_input
-/deckrypt_input.o
-vgcore.*
-*.o
-/kbd/
+debug/
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
