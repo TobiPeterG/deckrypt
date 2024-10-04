@@ -5,16 +5,18 @@ use evdev::{
 use libc::{c_int, getuid, input_absinfo};
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
-use std::io::Read;
+use std::io::{self, Read, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
-use std::env;
 
 // Include the toml crate in your Cargo.toml dependencies
 use toml::Value as TomlValue;
 
 // Include the sudo crate
 use sudo;
+
+// Include the clap crate for command-line argument parsing
+use clap::Parser;
 
 const AXIS_THRESHOLD_PERCENTAGE: f32 = 0.5;
 const KEY_MAX: u16 = 255;
@@ -45,6 +47,13 @@ enum Verbosity {
     Quiet,
     Verbose,
     VeryVerbose,
+}
+
+// Mapping can be a character or a special key
+#[derive(Clone, Debug)]
+enum Mapping {
+    Character(char),
+    Key(Key),
 }
 
 // FFI bindings to libkeymap
@@ -168,6 +177,9 @@ fn create_virtual_keyboard(
     keys.insert(Key::KEY_LEFTSHIFT);
     keys.insert(Key::KEY_RIGHTALT);
     keys.insert(Key::KEY_LEFTCTRL);
+    // Add special keys
+    keys.insert(Key::KEY_ENTER);
+    keys.insert(Key::KEY_ESC);
 
     let device = VirtualDeviceBuilder::new()?
         .name("Deckrypt Virtual Keyboard")
@@ -214,22 +226,22 @@ fn get_reversed_char(c: char) -> char {
     }
 }
 
-// Function to map gamepad events to characters (both buttons and axes)
-fn get_char_mappings(
+// Function to map gamepad events to mappings (both buttons and axes)
+fn get_mappings(
     device: &Device,
-    manual_mappings: &[(GamepadInput, char)],
-    axis_mappings: &[(GamepadInput, char)],
-    alternate_manual_mappings: &[(GamepadInput, char)],
-    alternate_axis_mappings: &[(GamepadInput, char)],
+    manual_mappings: &[(GamepadInput, Mapping)],
+    axis_mappings: &[(GamepadInput, Mapping)],
+    alternate_manual_mappings: &[(GamepadInput, Mapping)],
+    alternate_axis_mappings: &[(GamepadInput, Mapping)],
     normal_chars_iter: impl Iterator<Item = char> + Clone,
     additional_signs: &[char],
     abs_info_map: Option<&HashMap<u16, input_absinfo>>,
     modifiers: &Modifiers,
     verbosity: Verbosity,
 ) -> (
-    HashMap<GamepadInput, char>,
+    HashMap<GamepadInput, Mapping>,
     HashSet<char>,
-    HashMap<GamepadInput, char>,
+    HashMap<GamepadInput, Mapping>,
 ) {
     let mut normal_mapping = HashMap::new();
     let mut alternate_mapping = HashMap::new();
@@ -245,27 +257,35 @@ fn get_char_mappings(
     }
 
     // Map manual_mappings for normal mapping
-    for &(ref gamepad_input, character) in manual_mappings {
-        normal_mapping.insert(gamepad_input.clone(), character);
-        used_chars.insert(character);
+    for &(ref gamepad_input, ref mapping) in manual_mappings {
+        normal_mapping.insert(gamepad_input.clone(), mapping.clone());
+        if let Mapping::Character(character) = mapping {
+            used_chars.insert(*character);
+        }
     }
 
     // Map axis_mappings for normal mapping
-    for &(ref gamepad_input, character) in axis_mappings {
-        normal_mapping.insert(gamepad_input.clone(), character);
-        used_chars.insert(character);
+    for &(ref gamepad_input, ref mapping) in axis_mappings {
+        normal_mapping.insert(gamepad_input.clone(), mapping.clone());
+        if let Mapping::Character(character) = mapping {
+            used_chars.insert(*character);
+        }
     }
 
     // Map alternate_manual_mappings for alternate mapping
-    for &(ref gamepad_input, character) in alternate_manual_mappings {
-        alternate_mapping.insert(gamepad_input.clone(), character);
-        used_chars.insert(character);
+    for &(ref gamepad_input, ref mapping) in alternate_manual_mappings {
+        alternate_mapping.insert(gamepad_input.clone(), mapping.clone());
+        if let Mapping::Character(character) = mapping {
+            used_chars.insert(*character);
+        }
     }
 
     // Map alternate_axis_mappings for alternate mapping
-    for &(ref gamepad_input, character) in alternate_axis_mappings {
-        alternate_mapping.insert(gamepad_input.clone(), character);
-        used_chars.insert(character);
+    for &(ref gamepad_input, ref mapping) in alternate_axis_mappings {
+        alternate_mapping.insert(gamepad_input.clone(), mapping.clone());
+        if let Mapping::Character(character) = mapping {
+            used_chars.insert(*character);
+        }
     }
 
     // Collect all gamepad inputs that are not modifiers
@@ -316,7 +336,7 @@ fn get_char_mappings(
 
     for gamepad_input in &available_gamepad_inputs {
         if let Some(next_char) = normal_chars_iter.next() {
-            normal_mapping.insert(gamepad_input.clone(), next_char);
+            normal_mapping.insert(gamepad_input.clone(), Mapping::Character(next_char));
             used_chars.insert(next_char);
             if verbosity >= Verbosity::VeryVerbose {
                 println!(
@@ -344,7 +364,7 @@ fn get_char_mappings(
 
     for gamepad_input in &remaining_gamepad_inputs {
         if let Some(next_char) = numbers_iter.next() {
-            normal_mapping.insert(gamepad_input.clone(), next_char);
+            normal_mapping.insert(gamepad_input.clone(), Mapping::Character(next_char));
             used_chars.insert(next_char);
             if verbosity >= Verbosity::VeryVerbose {
                 println!(
@@ -374,7 +394,7 @@ fn get_char_mappings(
 
     for gamepad_input in &remaining_gamepad_inputs {
         if let Some(next_char) = symbols_iter.next() {
-            normal_mapping.insert(gamepad_input.clone(), next_char);
+            normal_mapping.insert(gamepad_input.clone(), Mapping::Character(next_char));
             used_chars.insert(next_char);
             if verbosity >= Verbosity::VeryVerbose {
                 println!(
@@ -397,17 +417,20 @@ fn get_char_mappings(
         .collect();
 
     // Ensure used_chars includes characters from both normal and alternate mappings
-    used_chars.extend(normal_mapping.values());
-    used_chars.extend(alternate_mapping.values());
+    for mapping in normal_mapping.values().chain(alternate_mapping.values()) {
+        if let Mapping::Character(c) = mapping {
+            used_chars.insert(*c);
+        }
+    }
 
     // For gamepad inputs that have a character assigned in normal mapping but not in alternate mapping,
     // assign the opposite character in alternate mapping, if not already used
     for gamepad_input in &unmapped_gamepad_inputs {
-        if let Some(&normal_char) = normal_mapping.get(gamepad_input) {
+        if let Some(Mapping::Character(normal_char)) = normal_mapping.get(gamepad_input) {
             let mut assigned_char = None;
 
             if normal_char.is_ascii_lowercase() || normal_char.is_ascii_uppercase() {
-                let opposite_char = get_reversed_char(normal_char);
+                let opposite_char = get_reversed_char(*normal_char);
                 if !used_chars.contains(&opposite_char) {
                     assigned_char = Some(opposite_char);
                 }
@@ -447,7 +470,7 @@ fn get_char_mappings(
             }
 
             if let Some(c) = assigned_char {
-                alternate_mapping.insert(gamepad_input.clone(), c);
+                alternate_mapping.insert(gamepad_input.clone(), Mapping::Character(c));
                 used_chars.insert(c);
                 if verbosity >= Verbosity::VeryVerbose {
                     println!(
@@ -462,29 +485,238 @@ fn get_char_mappings(
     (normal_mapping, used_chars, alternate_mapping)
 }
 
-fn find_first_device_with_btn_south() -> Option<Device> {
+fn get_buttons_and_axes_from_config(config_file_path: &str) -> std::io::Result<(HashSet<Key>, HashSet<u16>)> {
+    let mut file = File::open(config_file_path)?;
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)?;
+    let config = contents.parse::<TomlValue>().map_err(|e| {
+        io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse config: {}", e))
+    })?;
+
+    let mut buttons_in_config = HashSet::new();
+    let mut axes_in_config = HashSet::new();
+
+    // Parse button mappings
+    if let Some(buttons) = config.get("buttons").and_then(|v| v.as_table()) {
+        for (key_name, _value) in buttons {
+            if let Some(gamepad_input) = parse_gamepad_input(key_name) {
+                match gamepad_input {
+                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
+                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                }
+            }
+        }
+    }
+
+    // Parse axis mappings
+    if let Some(axes) = config.get("axes").and_then(|v| v.as_table()) {
+        for (axis_name, _) in axes {
+            if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
+                axes_in_config.insert(axis_type.0);
+            }
+        }
+    }
+
+    // Do the same for alternate_buttons and alternate_axes
+    if let Some(buttons) = config.get("alternate_buttons").and_then(|v| v.as_table()) {
+        for (key_name, _value) in buttons {
+            if let Some(gamepad_input) = parse_gamepad_input(key_name) {
+                match gamepad_input {
+                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
+                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                }
+            }
+        }
+    }
+
+    if let Some(axes) = config.get("alternate_axes").and_then(|v| v.as_table()) {
+        for (axis_name, _) in axes {
+            if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
+                axes_in_config.insert(axis_type.0);
+            }
+        }
+    }
+
+    // Parse modifiers
+    if let Some(mods) = config.get("modifiers").and_then(|v| v.as_table()) {
+        if let Some(shift_key) = mods.get("shift_key").and_then(|v| v.as_str()) {
+            if let Some(gamepad_input) = parse_gamepad_input(shift_key) {
+                match gamepad_input {
+                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
+                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                }
+            }
+        }
+        if let Some(alternate_key) = mods.get("alternate_key").and_then(|v| v.as_str()) {
+            if let Some(gamepad_input) = parse_gamepad_input(alternate_key) {
+                match gamepad_input {
+                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
+                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                }
+            }
+        }
+    }
+
+    Ok((buttons_in_config, axes_in_config))
+}
+
+fn absolute_axis_type_to_name(axis_code: u16) -> Option<&'static str> {
+    match AbsoluteAxisType(axis_code) {
+        AbsoluteAxisType::ABS_X => Some("ABS_X"),
+        AbsoluteAxisType::ABS_Y => Some("ABS_Y"),
+        AbsoluteAxisType::ABS_Z => Some("ABS_Z"),
+        AbsoluteAxisType::ABS_RX => Some("ABS_RX"),
+        AbsoluteAxisType::ABS_RY => Some("ABS_RY"),
+        AbsoluteAxisType::ABS_RZ => Some("ABS_RZ"),
+        AbsoluteAxisType::ABS_THROTTLE => Some("ABS_THROTTLE"),
+        AbsoluteAxisType::ABS_RUDDER => Some("ABS_RUDDER"),
+        AbsoluteAxisType::ABS_WHEEL => Some("ABS_WHEEL"),
+        AbsoluteAxisType::ABS_GAS => Some("ABS_GAS"),
+        AbsoluteAxisType::ABS_BRAKE => Some("ABS_BRAKE"),
+        AbsoluteAxisType::ABS_HAT0X => Some("ABS_HAT0X"),
+        AbsoluteAxisType::ABS_HAT0Y => Some("ABS_HAT0Y"),
+        AbsoluteAxisType::ABS_HAT1X => Some("ABS_HAT1X"),
+        AbsoluteAxisType::ABS_HAT1Y => Some("ABS_HAT1Y"),
+        AbsoluteAxisType::ABS_HAT2X => Some("ABS_HAT2X"),
+        AbsoluteAxisType::ABS_HAT2Y => Some("ABS_HAT2Y"),
+        AbsoluteAxisType::ABS_HAT3X => Some("ABS_HAT3X"),
+        AbsoluteAxisType::ABS_HAT3Y => Some("ABS_HAT3Y"),
+        AbsoluteAxisType::ABS_PRESSURE => Some("ABS_PRESSURE"),
+        AbsoluteAxisType::ABS_DISTANCE => Some("ABS_DISTANCE"),
+        AbsoluteAxisType::ABS_TILT_X => Some("ABS_TILT_X"),
+        AbsoluteAxisType::ABS_TILT_Y => Some("ABS_TILT_Y"),
+        AbsoluteAxisType::ABS_TOOL_WIDTH => Some("ABS_TOOL_WIDTH"),
+        AbsoluteAxisType::ABS_VOLUME => Some("ABS_VOLUME"),
+        AbsoluteAxisType::ABS_MISC => Some("ABS_MISC"),
+        _ => None,
+    }
+}
+
+fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u16)> {
     let input_dir = "/dev/input";
-    let entries = fs::read_dir(input_dir).ok()?;
+    let entries = fs::read_dir(input_dir).expect("Failed to read /dev/input");
+
+    let mut devices_with_config = Vec::new();
 
     for entry in entries {
-        let entry = entry.ok()?;
-        let path = entry.path();
+        if let Ok(entry) = entry {
+            let path = entry.path();
 
-        if let Ok(metadata) = fs::metadata(&path) {
-            if metadata.file_type().is_char_device() {
-                if let Ok(device) = Device::open(&path) {
-                    if device
-                        .supported_keys()
-                        .map_or(false, |keys| keys.contains(evdev::Key::BTN_SOUTH))
-                    {
-                        return Some(device);
+            if let Ok(metadata) = fs::metadata(&path) {
+                if metadata.file_type().is_char_device() {
+                    if let Ok(device) = Device::open(&path) {
+                        let name = device.name().unwrap_or("Unknown").to_string();
+                        let vendor_id = device.input_id().vendor();
+                        let product_id = device.input_id().product();
+
+                        // Possible config file paths
+                        let config_paths = vec![
+                            format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
+                            format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
+                        ];
+
+                        for config_file_path in config_paths {
+                            if fs::metadata(&config_file_path).is_ok() {
+                                // Now, get buttons and axes from config
+                                if let Ok((buttons_in_config, axes_in_config)) = get_buttons_and_axes_from_config(&config_file_path) {
+                                    // Get supported buttons and axes from device
+                                    let mut supported_buttons = HashSet::new();
+                                    if let Some(keys) = device.supported_keys() {
+                                        for key in keys.iter() {
+                                            supported_buttons.insert(key);
+                                        }
+                                    }
+
+                                    let mut supported_axes = HashSet::new();
+                                    if let Some(axes) = device.supported_absolute_axes() {
+                                        for axis in axes.iter() {
+                                            supported_axes.insert(axis.0);
+                                        }
+                                    }
+
+                                    // Check if all buttons and axes in config are supported by device
+                                    let buttons_supported = buttons_in_config.is_subset(&supported_buttons);
+                                    let axes_supported = axes_in_config.is_subset(&supported_axes);
+
+                                    if buttons_supported && axes_supported {
+                                        devices_with_config.push((
+                                            path.to_string_lossy().to_string(),
+                                            name.clone(),
+                                            vendor_id,
+                                            product_id,
+                                        ));
+                                        if verbosity >= Verbosity::Verbose {
+                                            println!("Found device with config: {:?}", name);
+                                        }
+                                        break; // Found a suitable config file for this device
+                                    } else {
+                                        if verbosity >= Verbosity::VeryVerbose {
+                                            println!("Device '{}' does not support all buttons/axes defined in config file '{}', skipping.", name, config_file_path);
+
+                                            // Calculate and print unsupported buttons
+                                            let unsupported_buttons = buttons_in_config.difference(&supported_buttons);
+                                            for key in unsupported_buttons {
+                                                println!("Unsupported button: {:?}", key);
+                                            }
+
+                                            // Calculate and print unsupported axes
+                                            let unsupported_axes = axes_in_config.difference(&supported_axes);
+                                            for axis_code in unsupported_axes {
+                                                if let Some(axis_name) = absolute_axis_type_to_name(*axis_code) {
+                                                    println!("Unsupported axis: {}", axis_name);
+                                                } else {
+                                                    println!("Unsupported axis code: {}", axis_code);
+                                                }
+                                            }
+                                        }
+                                        // Do not add this device
+                                    }
+                                } else {
+                                    // Failed to parse config file
+                                    if verbosity >= Verbosity::Verbose {
+                                        println!("Failed to parse config file '{}', skipping", config_file_path);
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    None
+    devices_with_config
+}
+
+fn list_connected_devices() -> Vec<(String, String, u16, u16)> {
+    let input_dir = "/dev/input";
+    let entries = fs::read_dir(input_dir).expect("Failed to read /dev/input");
+
+    let mut devices = Vec::new();
+
+    for entry in entries {
+        if let Ok(entry) = entry {
+            let path = entry.path();
+
+            if let Ok(metadata) = fs::metadata(&path) {
+                if metadata.file_type().is_char_device() {
+                    if let Ok(device) = Device::open(&path) {
+                        let name = device.name().unwrap_or("Unknown").to_string();
+                        let vendor_id = device.input_id().vendor();
+                        let product_id = device.input_id().product();
+                        devices.push((
+                            path.to_string_lossy().to_string(),
+                            name,
+                            vendor_id,
+                            product_id,
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    devices
 }
 
 // Helper function to parse gamepad input from string
@@ -513,13 +745,14 @@ fn parse_gamepad_input(input_str: &str) -> Option<GamepadInput> {
 
 // New function to load the configuration file
 fn load_controller_config(
-    device: &Device,
+    vendor_id: u16,
+    product_id: u16,
     verbosity: Verbosity,
 ) -> (
-    Vec<(GamepadInput, char)>,
-    Vec<(GamepadInput, char)>,
-    Vec<(GamepadInput, char)>, // Alternate manual mappings
-    Vec<(GamepadInput, char)>, // Alternate axis mappings
+    Vec<(GamepadInput, Mapping)>,
+    Vec<(GamepadInput, Mapping)>,
+    Vec<(GamepadInput, Mapping)>, // Alternate manual mappings
+    Vec<(GamepadInput, Mapping)>, // Alternate axis mappings
     Modifiers,
 ) {
     let mut manual_mappings = Vec::new();
@@ -527,10 +760,6 @@ fn load_controller_config(
     let mut alternate_manual_mappings = Vec::new();
     let mut alternate_axis_mappings = Vec::new();
     let mut modifiers = Modifiers::default();
-
-    // Identify the controller
-    let vendor_id = device.input_id().vendor();
-    let product_id = device.input_id().product();
 
     // Possible config file paths
     let config_paths = vec![
@@ -552,11 +781,9 @@ fn load_controller_config(
                     // Parse button mappings
                     if let Some(buttons) = config.get("buttons").and_then(|v| v.as_table()) {
                         for (key_name, value) in buttons {
-                            if let Some(character) = value.as_str() {
+                            if let Some(mapping) = parse_mapping(value) {
                                 if let Some(gamepad_input) = parse_gamepad_input(key_name) {
-                                    if let Some(c) = character.chars().next() {
-                                        manual_mappings.push((gamepad_input, c));
-                                    }
+                                    manual_mappings.push((gamepad_input, mapping));
                                 }
                             }
                         }
@@ -566,28 +793,22 @@ fn load_controller_config(
                     if let Some(axes) = config.get("axes").and_then(|v| v.as_table()) {
                         for (axis_name, value) in axes {
                             if let Some(axis_values) = value.as_table() {
-                                let negative_char = axis_values
-                                    .get("negative")
-                                    .and_then(|v| v.as_str())
-                                    .and_then(|s| s.chars().next());
-                                let positive_char = axis_values
-                                    .get("positive")
-                                    .and_then(|v| v.as_str())
-                                    .and_then(|s| s.chars().next());
-
-                                if let Some(neg_char) = negative_char {
-                                    if let Some(gamepad_input) =
-                                        parse_gamepad_input(&format!("{}_NEG", axis_name))
-                                    {
-                                        axis_mappings.push((gamepad_input, neg_char));
+                                if let Some(neg_value) = axis_values.get("negative") {
+                                    if let Some(mapping) = parse_mapping(neg_value) {
+                                        if let Some(gamepad_input) =
+                                            parse_gamepad_input(&format!("{}_NEG", axis_name))
+                                        {
+                                            axis_mappings.push((gamepad_input, mapping));
+                                        }
                                     }
                                 }
-
-                                if let Some(pos_char) = positive_char {
-                                    if let Some(gamepad_input) =
-                                        parse_gamepad_input(&format!("{}_POS", axis_name))
-                                    {
-                                        axis_mappings.push((gamepad_input, pos_char));
+                                if let Some(pos_value) = axis_values.get("positive") {
+                                    if let Some(mapping) = parse_mapping(pos_value) {
+                                        if let Some(gamepad_input) =
+                                            parse_gamepad_input(&format!("{}_POS", axis_name))
+                                        {
+                                            axis_mappings.push((gamepad_input, mapping));
+                                        }
                                     }
                                 }
                             }
@@ -600,11 +821,9 @@ fn load_controller_config(
                         .and_then(|v| v.as_table())
                     {
                         for (key_name, value) in buttons {
-                            if let Some(character) = value.as_str() {
+                            if let Some(mapping) = parse_mapping(value) {
                                 if let Some(gamepad_input) = parse_gamepad_input(key_name) {
-                                    if let Some(c) = character.chars().next() {
-                                        alternate_manual_mappings.push((gamepad_input, c));
-                                    }
+                                    alternate_manual_mappings.push((gamepad_input, mapping));
                                 }
                             }
                         }
@@ -617,28 +836,22 @@ fn load_controller_config(
                     {
                         for (axis_name, value) in axes {
                             if let Some(axis_values) = value.as_table() {
-                                let negative_char = axis_values
-                                    .get("negative")
-                                    .and_then(|v| v.as_str())
-                                    .and_then(|s| s.chars().next());
-                                let positive_char = axis_values
-                                    .get("positive")
-                                    .and_then(|v| v.as_str())
-                                    .and_then(|s| s.chars().next());
-
-                                if let Some(neg_char) = negative_char {
-                                    if let Some(gamepad_input) =
-                                        parse_gamepad_input(&format!("{}_NEG", axis_name))
-                                    {
-                                        alternate_axis_mappings.push((gamepad_input, neg_char));
+                                if let Some(neg_value) = axis_values.get("negative") {
+                                    if let Some(mapping) = parse_mapping(neg_value) {
+                                        if let Some(gamepad_input) =
+                                            parse_gamepad_input(&format!("{}_NEG", axis_name))
+                                        {
+                                            alternate_axis_mappings.push((gamepad_input, mapping));
+                                        }
                                     }
                                 }
-
-                                if let Some(pos_char) = positive_char {
-                                    if let Some(gamepad_input) =
-                                        parse_gamepad_input(&format!("{}_POS", axis_name))
-                                    {
-                                        alternate_axis_mappings.push((gamepad_input, pos_char));
+                                if let Some(pos_value) = axis_values.get("positive") {
+                                    if let Some(mapping) = parse_mapping(pos_value) {
+                                        if let Some(gamepad_input) =
+                                            parse_gamepad_input(&format!("{}_POS", axis_name))
+                                        {
+                                            alternate_axis_mappings.push((gamepad_input, mapping));
+                                        }
                                     }
                                 }
                             }
@@ -688,9 +901,24 @@ fn load_controller_config(
     )
 }
 
+// Helper function to parse mapping from TOML value
+fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
+    if let Some(s) = value.as_str() {
+        // Try to parse as single character
+        if s.len() == 1 {
+            return Some(Mapping::Character(s.chars().next().unwrap()));
+        } else if let Some(key) = key_name_to_key(s) {
+            return Some(Mapping::Key(key));
+        }
+    }
+    None
+}
+
 // Helper function to convert key name to Key enum
 fn key_name_to_key(name: &str) -> Option<Key> {
     match name {
+        "ENTER" => Some(Key::KEY_ENTER),
+        "ESCAPE" => Some(Key::KEY_ESC),
         "BTN_SOUTH" => Some(Key::BTN_SOUTH),
         "BTN_NORTH" => Some(Key::BTN_NORTH),
         "BTN_WEST" => Some(Key::BTN_WEST),
@@ -723,18 +951,55 @@ fn axis_name_to_absolute_axis_type(name: &str) -> Option<AbsoluteAxisType> {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(
+    name = "Deckrypt",
+    version = "0.1.0",
+    author = "Tobias Görgens <tobi.goergens@gmail.com>",
+    about = "Map gamepad inputs to keyboard events",
+    after_help = "Source: https://github.com/TobiPeterG/deckrypt",
+    help_template = "\
+{before-help}{name} {version}
+{author-with-newline}{about-with-newline}
+{usage-heading} {usage}
+
+{all-args}{after-help}
+"
+)]
+struct Args {
+    /// Increases verbosity level (-v, -vv)
+    #[arg(short, action = clap::ArgAction::Count)]
+    verbosity: u8,
+
+    /// Use unknown devices and prompt for selection
+    #[arg(short, long)]
+    unknown: bool,
+
+    /// Automatically select the first device if multiple devices are found (not compatible with -u)
+    #[arg(short = 'a', long)]
+    auto_select: bool,
+}
+
 fn main() -> std::io::Result<()> {
     // Use the 'sudo' crate to escalate privileges if needed
     sudo::escalate_if_needed().expect("Failed to escalate privileges");
 
-    // Determine verbosity level based on command-line arguments
-    let verbosity = if env::args().any(|arg| arg == "-vv") {
-        Verbosity::VeryVerbose
-    } else if env::args().any(|arg| arg == "-v") {
-        Verbosity::Verbose
-    } else {
-        Verbosity::Quiet
+    let args = Args::parse();
+
+    // Determine verbosity level based on occurrences of -v
+    let verbosity = match args.verbosity {
+        0 => Verbosity::Quiet,
+        1 => Verbosity::Verbose,
+        _ => Verbosity::VeryVerbose,
     };
+
+    if args.unknown && args.auto_select {
+        eprintln!("--unknown does not support --auto-select!");
+        std::process::exit(1);
+    }
+
+    // Check if --unknown flag is set
+    let use_unknown = args.unknown;
 
     let (chrmap, _shifted_chars) = match generate_chrmap() {
         Some(maps) => maps,
@@ -764,90 +1029,224 @@ fn main() -> std::io::Result<()> {
     // Collect all keyboard keys used in chrmap
     let all_keyboard_keys: Vec<Key> = chrmap.values().map(|&(key, _)| key).collect();
 
-    loop {
-        if let Some(mut gamepad_device) = find_first_device_with_btn_south() {
-            if verbosity >= Verbosity::Verbose {
-                println!("Listening for gamepad events...");
-            }
+    // Start of main logic
+    let vendor_id;
+let product_id;
+let device_path;
 
-            // Get absolute axis information and store in a HashMap
-            let abs_info = gamepad_device.get_abs_state().ok();
-            let abs_info_map = abs_info.as_ref().map(|abs_info| {
-                let mut map = HashMap::new();
-                for (i, info) in abs_info.iter().enumerate() {
-                    if info.maximum != 0 || info.minimum != 0 {
-                        map.insert(i as u16, *info);
+    if use_unknown {
+        // List connected devices and prompt the user to select one
+        let devices = list_connected_devices();
+        if devices.is_empty() {
+            eprintln!("No input devices found.");
+            std::process::exit(1);
+        }
+
+        println!("Available devices:");
+        for (i, (path, name, vendor_id, product_id)) in devices.iter().enumerate() {
+            println!(
+                "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                i,
+                path,
+                name,
+                vendor_id,
+                product_id
+            );
+        }
+
+        print!("Enter the number of the device to use: ");
+        io::stdout().flush().unwrap();
+
+        let mut input = String::new();
+        io::stdin().read_line(&mut input)?;
+        let selection = input.trim().parse::<usize>();
+
+        match selection {
+            Ok(num) if num <= devices.len() => {
+                let (ref path, ref name, vid, pid) = devices[num];
+                device_path = path.clone();
+                vendor_id = vid;
+                product_id = pid;
+    
+                println!(
+                    "Selected device: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                    device_path, name, vendor_id, product_id
+                );
+    
+                println!(
+                    "Config file name would be: {}_{}.toml",
+                    vendor_id, product_id
+                );
+    
+                // Open the device
+                let device = Device::open(&device_path)?;
+    
+                // Print recognized buttons and axes
+                if let Some(keys) = device.supported_keys() {
+                    println!("Supported buttons:");
+                    for key in keys.iter() {
+                        println!("{:?}", key);
                     }
                 }
-                map
-            });
+                if let Some(axes) = device.supported_absolute_axes() {
+                    println!("Supported axes:");
+                    for axis in axes.iter() {
+                        println!("{:?}", axis);
+                    }
+                }
+            }
+            _ => {
+                eprintln!("Invalid selection.");
+                std::process::exit(1);
+            }
+        }
+    } else {
+        let devices = find_devices_with_config(verbosity);
+        if devices.is_empty() {
+            eprintln!("No devices with config files found.");
+            std::process::exit(1);
+        } else if devices.len() == 1 {
+            let (path, _, vid, pid) = devices.into_iter().next().unwrap();
+            device_path = path;
+            vendor_id = vid;
+            product_id = pid;
+        } else {
+            // Multiple devices found
+            if args.auto_select {
+                let (path, name, vid, pid) = devices[0].clone();
+                if verbosity >= Verbosity::Verbose {
+                    println!(
+                        "Automatically selected device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                        name, vid, pid
+                    );
+                }
+                device_path = path;
+                vendor_id = vid;
+                product_id = pid;
+            } else {
+            // Multiple devices found, prompt the user to select one
+            println!("Multiple devices with config files found:");
+            for (i, (path, name, vid, pid)) in devices.iter().enumerate() {
+                println!(
+                    "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                    i,
+                    path,
+                    name,
+                    vid,
+                    pid
+                );
+            }
 
-            // Load controller-specific mappings and modifiers
-            let (
-                manual_mappings,
-                axis_mappings,
-                alternate_manual_mappings,
-                alternate_axis_mappings,
-                mut modifiers,
-            ) = load_controller_config(&gamepad_device, verbosity);
+            print!("Enter the number of the device to use: ");
+            io::stdout().flush().unwrap();
 
-            let mut virtual_keyboard = create_virtual_keyboard(&all_keyboard_keys)
-                .expect("Failed to create virtual keyboard");
+            let mut input = String::new();
+            io::stdin().read_line(&mut input)?;
+            let selection = input.trim().parse::<usize>();
 
-            let (normal_mapping, _used_chars, alternate_mapping) = get_char_mappings(
-                &gamepad_device,
-                &manual_mappings,
-                &axis_mappings,
-                &alternate_manual_mappings,
-                &alternate_axis_mappings,
-                normal_chars.clone(),
-                &additional_signs,
-                abs_info_map.as_ref(),
-                &modifiers,
-                verbosity,
-            );
+            match selection {
+                Ok(num) if num <= devices.len() => {
+                    let (path, _, vid, pid) = devices[num].clone();
+                    device_path = path;
+                    vendor_id = vid;
+                    product_id = pid;
+                }
+                _ => {
+                    eprintln!("Invalid selection.");
+                    std::process::exit(1);
+                }
+            }
+        }
+    }
+}
 
-            let mut axis_states: HashMap<u16, i32> = HashMap::new();
-            let mut pressed_inputs: HashMap<GamepadInput, bool> = HashMap::new();
-            let mut pressed_axes: HashMap<GamepadInput, bool> = HashMap::new();
+    // Open the selected device
+    let mut gamepad_device = Device::open(&device_path)?;
 
-            loop {
-                for ev in gamepad_device.fetch_events().expect("Failed to fetch events") {
-                    match ev.kind() {
-                        InputEventKind::Key(key) => {
-                            let gamepad_input = GamepadInput::Button(key);
+    // Get absolute axis information and store in a HashMap
+    let abs_info = gamepad_device.get_abs_state().ok();
+    let abs_info_map = abs_info.as_ref().map(|abs_info| {
+        let mut map = HashMap::new();
+        for (i, info) in abs_info.iter().enumerate() {
+            if info.maximum != 0 || info.minimum != 0 {
+                map.insert(i as u16, *info);
+            }
+        }
+        map
+    });
 
-                            // Check if the event is for shift_modifier
-                            if Some(gamepad_input.clone()) == modifiers.shift_modifier {
-                                // Handle shift modifier
-                                let shift_value = ev.value();
-                                let shift_event = InputEvent::new(
-                                    EventType::KEY,
-                                    Key::KEY_LEFTSHIFT.code(),
-                                    shift_value,
-                                );
-                                virtual_keyboard.emit(&[shift_event])?;
-                                continue;
-                            }
+    // Load controller-specific mappings and modifiers
+    let (
+        manual_mappings,
+        axis_mappings,
+        alternate_manual_mappings,
+        alternate_axis_mappings,
+        mut modifiers,
+    ) = load_controller_config(vendor_id, product_id, verbosity);
 
-                            // Check if the event is for alternate_modifier
-                            if Some(gamepad_input.clone()) == modifiers.alternate_modifier {
-                                modifiers.alternate_active = ev.value() == 1;
-                                continue;
-                            }
+    let mut virtual_keyboard = create_virtual_keyboard(&all_keyboard_keys)
+        .expect("Failed to create virtual keyboard");
 
-                            let is_pressed = ev.value() == 1;
+    let (normal_mapping, _used_chars, alternate_mapping) = get_mappings(
+        &gamepad_device,
+        &manual_mappings,
+        &axis_mappings,
+        &alternate_manual_mappings,
+        &alternate_axis_mappings,
+        normal_chars.clone(),
+        &additional_signs,
+        abs_info_map.as_ref(),
+        &modifiers,
+        verbosity,
+    );
 
-                            if is_pressed {
-                                // Determine the mapping at the time of press
-                                let mapping = if modifiers.alternate_active {
-                                    &alternate_mapping
-                                } else {
-                                    &normal_mapping
-                                };
+    let mut axis_states: HashMap<u16, i32> = HashMap::new();
+    let mut pressed_inputs: HashMap<GamepadInput, bool> = HashMap::new();
+    let mut pressed_axes: HashMap<GamepadInput, bool> = HashMap::new();
 
-                                if let Some(&character) = mapping.get(&gamepad_input) {
-                                    if let Some(&(keycode, modifier)) = chrmap.get(&character) {
+    if verbosity >= Verbosity::Verbose {
+        println!("Listening for gamepad events...");
+    }
+
+    loop {
+        for ev in gamepad_device.fetch_events().expect("Failed to fetch events") {
+            match ev.kind() {
+                InputEventKind::Key(key) => {
+                    let gamepad_input = GamepadInput::Button(key);
+
+                    // Check if the event is for shift_modifier
+                    if Some(gamepad_input.clone()) == modifiers.shift_modifier {
+                        // Handle shift modifier
+                        let shift_value = ev.value();
+                        let shift_event = InputEvent::new(
+                            EventType::KEY,
+                            Key::KEY_LEFTSHIFT.code(),
+                            shift_value,
+                        );
+                        virtual_keyboard.emit(&[shift_event])?;
+                        continue;
+                    }
+
+                    // Check if the event is for alternate_modifier
+                    if Some(gamepad_input.clone()) == modifiers.alternate_modifier {
+                        modifiers.alternate_active = ev.value() == 1;
+                        continue;
+                    }
+
+                    let is_pressed = ev.value() == 1;
+
+                    if is_pressed {
+                        // Determine the mapping at the time of press
+                        let mapping = if modifiers.alternate_active {
+                            &alternate_mapping
+                        } else {
+                            &normal_mapping
+                        };
+
+                        if let Some(mapping_value) = mapping.get(&gamepad_input) {
+                            match mapping_value {
+                                Mapping::Character(character) => {
+                                    if let Some(&(keycode, modifier)) = chrmap.get(character) {
                                         // Handle modifiers if necessary
                                         if modifier == 1 {
                                             let shift_event = InputEvent::new(
@@ -866,25 +1265,44 @@ fn main() -> std::io::Result<()> {
                                         pressed_inputs
                                             .insert(gamepad_input.clone(), modifiers.alternate_active);
 
-                                        if verbosity >= Verbosity::VeryVerbose {
+                                        if verbosity >= Verbosity::Verbose {
                                             println!(
-                                                "Button {:?} activated, sending character '{}'",
+                                                "Button {:?} pressed, sending character '{}'",
                                                 key, character
                                             );
                                         }
                                     }
                                 }
-                            } else {
-                                // On release, use the mapping stored at the time of press
-                                if let Some(&was_alternate) = pressed_inputs.get(&gamepad_input) {
-                                    let mapping = if was_alternate {
-                                        &alternate_mapping
-                                    } else {
-                                        &normal_mapping
-                                    };
+                                Mapping::Key(keycode) => {
+                                    let event = InputEvent::new(EventType::KEY, keycode.code(), 1);
+                                    virtual_keyboard.emit(&[event])?;
 
-                                    if let Some(&character) = mapping.get(&gamepad_input) {
-                                        if let Some(&(keycode, modifier)) = chrmap.get(&character) {
+                                    // Record the mapping used
+                                    pressed_inputs
+                                        .insert(gamepad_input.clone(), modifiers.alternate_active);
+
+                                    if verbosity >= Verbosity::Verbose {
+                                        println!(
+                                            "Button {:?} pressed, sending key '{:?}'",
+                                            key, keycode
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // On release, use the mapping stored at the time of press
+                        if let Some(&was_alternate) = pressed_inputs.get(&gamepad_input) {
+                            let mapping = if was_alternate {
+                                &alternate_mapping
+                            } else {
+                                &normal_mapping
+                            };
+
+                            if let Some(mapping_value) = mapping.get(&gamepad_input) {
+                                match mapping_value {
+                                    Mapping::Character(character) => {
+                                        if let Some(&(keycode, modifier)) = chrmap.get(character) {
                                             // Handle modifiers if necessary
                                             if modifier == 1 {
                                                 let shift_event = InputEvent::new(
@@ -899,241 +1317,271 @@ fn main() -> std::io::Result<()> {
                                                 InputEvent::new(EventType::KEY, keycode.code(), 0);
                                             virtual_keyboard.emit(&[event])?;
 
-                                            if verbosity >= Verbosity::VeryVerbose {
+                                            if verbosity >= Verbosity::Verbose {
                                                 println!(
-                                                    "Button {:?} deactivated, releasing character '{}'",
+                                                    "Button {:?} released, releasing character '{}'",
                                                     key, character
                                                 );
                                             }
                                         }
                                     }
+                                    Mapping::Key(keycode) => {
+                                        let event =
+                                            InputEvent::new(EventType::KEY, keycode.code(), 0);
+                                        virtual_keyboard.emit(&[event])?;
 
-                                    // Remove the input from the pressed_inputs map
-                                    pressed_inputs.remove(&gamepad_input);
+                                        if verbosity >= Verbosity::Verbose {
+                                            println!(
+                                                "Button {:?} released, releasing key '{:?}'",
+                                                key, keycode
+                                            );
+                                        }
+                                    }
                                 }
                             }
+
+                            // Remove the input from the pressed_inputs map
+                            pressed_inputs.remove(&gamepad_input);
                         }
-                        InputEventKind::AbsAxis(axis) => {
-                            let axis_value = ev.value();
-                            let previous_value = axis_states.get(&axis.0).cloned().unwrap_or(0);
+                    }
+                }
+                InputEventKind::AbsAxis(axis) => {
+                    let axis_value = ev.value();
+                    let previous_value = axis_states.get(&axis.0).cloned().unwrap_or(0);
 
-                            // Check for shift_modifier axis
-                            let gamepad_input_positive =
-                                GamepadInput::Axis(axis.0, Direction::Positive);
-                            let gamepad_input_negative =
-                                GamepadInput::Axis(axis.0, Direction::Negative);
+                    // Check for shift_modifier axis
+                    let gamepad_input_positive = GamepadInput::Axis(axis.0, Direction::Positive);
+                    let gamepad_input_negative = GamepadInput::Axis(axis.0, Direction::Negative);
 
-                            if Some(gamepad_input_positive.clone()) == modifiers.shift_modifier
-                                || Some(gamepad_input_negative.clone())
-                                    == modifiers.shift_modifier
-                            {
-                                // Handle shift modifier
-                                let shift_value = if axis_value != 0 { 1 } else { 0 };
-                                let shift_event = InputEvent::new(
-                                    EventType::KEY,
-                                    Key::KEY_LEFTSHIFT.code(),
-                                    shift_value,
-                                );
-                                virtual_keyboard.emit(&[shift_event])?;
-                                continue;
+                    if Some(gamepad_input_positive.clone()) == modifiers.shift_modifier
+                        || Some(gamepad_input_negative.clone()) == modifiers.shift_modifier
+                    {
+                        // Handle shift modifier
+                        let shift_value = if axis_value != 0 { 1 } else { 0 };
+                        let shift_event = InputEvent::new(
+                            EventType::KEY,
+                            Key::KEY_LEFTSHIFT.code(),
+                            shift_value,
+                        );
+                        virtual_keyboard.emit(&[shift_event])?;
+                        continue;
+                    }
+
+                    // Check for alternate_modifier axis
+                    if Some(gamepad_input_positive.clone()) == modifiers.alternate_modifier
+                        || Some(gamepad_input_negative.clone()) == modifiers.alternate_modifier
+                    {
+                        modifiers.alternate_active = axis_value != 0;
+                        continue;
+                    }
+
+                    // Rest of your axis handling
+                    if let Some(abs_info) = abs_info_map.as_ref().and_then(|map| map.get(&axis.0)) {
+                        let (activation_threshold, release_threshold) =
+                            get_axis_thresholds(abs_info);
+
+                        // Determine mapping at the time of activation
+                        let mapping_at_activation = if modifiers.alternate_active {
+                            &alternate_mapping
+                        } else {
+                            &normal_mapping
+                        };
+
+                        // Handle negative direction activation
+                        if abs_info.minimum < 0
+                            && axis_value <= release_threshold
+                            && previous_value > release_threshold
+                        {
+                            let neg_input = GamepadInput::Axis(axis.0, Direction::Negative);
+
+                            if let Some(mapping_value) = mapping_at_activation.get(&neg_input) {
+                                // Handle mapping similarly to button events
+                                handle_mapping_activation(
+                                    &neg_input,
+                                    mapping_value,
+                                    &chrmap,
+                                    &mut virtual_keyboard,
+                                    verbosity,
+                                    &mut pressed_axes,
+                                    modifiers.alternate_active,
+                                )?;
                             }
+                        }
+                        // Handle positive direction activation
+                        else if abs_info.maximum > 0
+                            && axis_value >= activation_threshold
+                            && previous_value < activation_threshold
+                        {
+                            let pos_input = GamepadInput::Axis(axis.0, Direction::Positive);
 
-                            // Check for alternate_modifier axis
-                            if Some(gamepad_input_positive.clone())
-                                == modifiers.alternate_modifier
-                                || Some(gamepad_input_negative.clone())
-                                    == modifiers.alternate_modifier
-                            {
-                                modifiers.alternate_active = axis_value != 0;
-                                continue;
+                            if let Some(mapping_value) = mapping_at_activation.get(&pos_input) {
+                                // Handle mapping similarly to button events
+                                handle_mapping_activation(
+                                    &pos_input,
+                                    mapping_value,
+                                    &chrmap,
+                                    &mut virtual_keyboard,
+                                    verbosity,
+                                    &mut pressed_axes,
+                                    modifiers.alternate_active,
+                                )?;
                             }
-
-                            // Rest of your axis handling
-                            if let Some(abs_info) =
-                                abs_info_map.as_ref().and_then(|map| map.get(&axis.0))
-                            {
-                                let (activation_threshold, release_threshold) =
-                                    get_axis_thresholds(abs_info);
-
-                                // Determine mapping at the time of activation
-                                let mapping_at_activation = if modifiers.alternate_active {
+                        }
+                        // Handle axis returning to neutral
+                        else if axis_value.abs() < activation_threshold
+                            && previous_value.abs() >= activation_threshold
+                        {
+                            // Handle negative direction release
+                            let neg_input = GamepadInput::Axis(axis.0, Direction::Negative);
+                            if let Some(&was_alternate) = pressed_axes.get(&neg_input) {
+                                let mapping = if was_alternate {
                                     &alternate_mapping
                                 } else {
                                     &normal_mapping
                                 };
 
-                                // Handle negative direction activation
-                                if abs_info.minimum < 0
-                                    && axis_value <= release_threshold
-                                    && previous_value > release_threshold
-                                {
-                                    let neg_input = GamepadInput::Axis(axis.0, Direction::Negative);
-
-                                    if let Some(&character) = mapping_at_activation.get(&neg_input) {
-                                        if let Some(&(keycode, modifier)) = chrmap.get(&character) {
-                                            // Handle modifiers if necessary
-                                            if modifier == 1 {
-                                                let shift_event = InputEvent::new(
-                                                    EventType::KEY,
-                                                    Key::KEY_LEFTSHIFT.code(),
-                                                    1,
-                                                );
-                                                virtual_keyboard.emit(&[shift_event])?;
-                                            }
-
-                                            let event =
-                                                InputEvent::new(EventType::KEY, keycode.code(), 1);
-                                            virtual_keyboard.emit(&[event])?;
-
-                                            // Record the mapping used
-                                            pressed_axes
-                                                .insert(neg_input.clone(), modifiers.alternate_active);
-
-                                            if verbosity >= Verbosity::VeryVerbose {
-                                                println!(
-                                                    "Axis {:?} negative activated, sending character '{}'",
-                                                    axis, character
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                // Handle positive direction activation
-                                else if abs_info.maximum > 0
-                                    && axis_value >= activation_threshold
-                                    && previous_value < activation_threshold
-                                {
-                                    let pos_input = GamepadInput::Axis(axis.0, Direction::Positive);
-
-                                    if let Some(&character) = mapping_at_activation.get(&pos_input) {
-                                        if let Some(&(keycode, modifier)) = chrmap.get(&character) {
-                                            // Handle modifiers if necessary
-                                            if modifier == 1 {
-                                                let shift_event = InputEvent::new(
-                                                    EventType::KEY,
-                                                    Key::KEY_LEFTSHIFT.code(),
-                                                    1,
-                                                );
-                                                virtual_keyboard.emit(&[shift_event])?;
-                                            }
-
-                                            let event =
-                                                InputEvent::new(EventType::KEY, keycode.code(), 1);
-                                            virtual_keyboard.emit(&[event])?;
-
-                                            // Record the mapping used
-                                            pressed_axes
-                                                .insert(pos_input.clone(), modifiers.alternate_active);
-
-                                            if verbosity >= Verbosity::VeryVerbose {
-                                                println!(
-                                                    "Axis {:?} positive activated, sending character '{}'",
-                                                    axis, character
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                                // Handle axis returning to neutral
-                                else if axis_value.abs() < activation_threshold
-                                    && previous_value.abs() >= activation_threshold
-                                {
-                                    // Handle negative direction release
-                                    let neg_input = GamepadInput::Axis(axis.0, Direction::Negative);
-                                    if let Some(&was_alternate) = pressed_axes.get(&neg_input) {
-                                        let mapping = if was_alternate {
-                                            &alternate_mapping
-                                        } else {
-                                            &normal_mapping
-                                        };
-
-                                        if let Some(&character) = mapping.get(&neg_input) {
-                                            if let Some(&(keycode, modifier)) = chrmap.get(&character) {
-                                                // Handle modifiers if necessary
-                                                if modifier == 1 {
-                                                    let shift_event = InputEvent::new(
-                                                        EventType::KEY,
-                                                        Key::KEY_LEFTSHIFT.code(),
-                                                        0,
-                                                    );
-                                                    virtual_keyboard.emit(&[shift_event])?;
-                                                }
-
-                                                let event = InputEvent::new(
-                                                    EventType::KEY,
-                                                    keycode.code(),
-                                                    0,
-                                                );
-                                                virtual_keyboard.emit(&[event])?;
-
-                                                if verbosity >= Verbosity::VeryVerbose {
-                                                    println!(
-                                                        "Axis {:?} negative deactivated, releasing character '{}'",
-                                                        axis, character
-                                                    );
-                                                }
-                                            }
-                                        }
-
-                                        // Remove from pressed_axes
-                                        pressed_axes.remove(&neg_input);
-                                    }
-
-                                    // Handle positive direction release
-                                    let pos_input = GamepadInput::Axis(axis.0, Direction::Positive);
-                                    if let Some(&was_alternate) = pressed_axes.get(&pos_input) {
-                                        let mapping = if was_alternate {
-                                            &alternate_mapping
-                                        } else {
-                                            &normal_mapping
-                                        };
-
-                                        if let Some(&character) = mapping.get(&pos_input) {
-                                            if let Some(&(keycode, modifier)) = chrmap.get(&character) {
-                                                // Handle modifiers if necessary
-                                                if modifier == 1 {
-                                                    let shift_event = InputEvent::new(
-                                                        EventType::KEY,
-                                                        Key::KEY_LEFTSHIFT.code(),
-                                                        0,
-                                                    );
-                                                    virtual_keyboard.emit(&[shift_event])?;
-                                                }
-
-                                                let event = InputEvent::new(
-                                                    EventType::KEY,
-                                                    keycode.code(),
-                                                    0,
-                                                );
-                                                virtual_keyboard.emit(&[event])?;
-
-                                                if verbosity >= Verbosity::VeryVerbose {
-                                                    println!(
-                                                        "Axis {:?} positive deactivated, releasing character '{}'",
-                                                        axis, character
-                                                    );
-                                                }
-                                            }
-                                        }
-
-                                        // Remove from pressed_axes
-                                        pressed_axes.remove(&pos_input);
-                                    }
+                                if let Some(mapping_value) = mapping.get(&neg_input) {
+                                    handle_mapping_release(
+                                        &neg_input,
+                                        mapping_value,
+                                        &chrmap,
+                                        &mut virtual_keyboard,
+                                        verbosity,
+                                    )?;
                                 }
 
-                                axis_states.insert(axis.0, axis_value);
+                                // Remove from pressed_axes
+                                pressed_axes.remove(&neg_input);
+                            }
+
+                            // Handle positive direction release
+                            let pos_input = GamepadInput::Axis(axis.0, Direction::Positive);
+                            if let Some(&was_alternate) = pressed_axes.get(&pos_input) {
+                                let mapping = if was_alternate {
+                                    &alternate_mapping
+                                } else {
+                                    &normal_mapping
+                                };
+
+                                if let Some(mapping_value) = mapping.get(&pos_input) {
+                                    handle_mapping_release(
+                                        &pos_input,
+                                        mapping_value,
+                                        &chrmap,
+                                        &mut virtual_keyboard,
+                                        verbosity,
+                                    )?;
+                                }
+
+                                // Remove from pressed_axes
+                                pressed_axes.remove(&pos_input);
                             }
                         }
-                        _ => (),
+
+                        axis_states.insert(axis.0, axis_value);
                     }
                 }
+                _ => (),
             }
-        } else {
-            if verbosity >= Verbosity::Verbose {
-                println!("No device with BTN_SOUTH found. Retrying in 1 second...");
-            }
-            std::thread::sleep(std::time::Duration::from_secs(1));
-            continue;
         }
     }
+}
+
+// Helper function to handle mapping activation
+fn handle_mapping_activation(
+    gamepad_input: &GamepadInput,
+    mapping_value: &Mapping,
+    chrmap: &HashMap<char, (Key, u8)>,
+    virtual_keyboard: &mut evdev::uinput::VirtualDevice,
+    verbosity: Verbosity,
+    pressed_inputs: &mut HashMap<GamepadInput, bool>,
+    alternate_active: bool,
+) -> std::io::Result<()> {
+    match mapping_value {
+        Mapping::Character(character) => {
+            if let Some(&(keycode, modifier)) = chrmap.get(character) {
+                // Handle modifiers if necessary
+                if modifier == 1 {
+                    let shift_event = InputEvent::new(
+                        EventType::KEY,
+                        Key::KEY_LEFTSHIFT.code(),
+                        1,
+                    );
+                    virtual_keyboard.emit(&[shift_event])?;
+                }
+
+                let event = InputEvent::new(EventType::KEY, keycode.code(), 1);
+                virtual_keyboard.emit(&[event])?;
+
+                // Record the mapping used
+                pressed_inputs.insert(gamepad_input.clone(), alternate_active);
+
+                if verbosity >= Verbosity::Verbose {
+                    println!(
+                        "{:?} activated, sending character '{}'",
+                        gamepad_input, character
+                    );
+                }
+            }
+        }
+        Mapping::Key(keycode) => {
+            let event = InputEvent::new(EventType::KEY, keycode.code(), 1);
+            virtual_keyboard.emit(&[event])?;
+
+            // Record the mapping used
+            pressed_inputs.insert(gamepad_input.clone(), alternate_active);
+
+            if verbosity >= Verbosity::Verbose {
+                println!("{:?} activated, sending key '{:?}'", gamepad_input, keycode);
+            }
+        }
+    }
+    Ok(())
+}
+
+// Helper function to handle mapping release
+fn handle_mapping_release(
+    gamepad_input: &GamepadInput,
+    mapping_value: &Mapping,
+    chrmap: &HashMap<char, (Key, u8)>,
+    virtual_keyboard: &mut evdev::uinput::VirtualDevice,
+    verbosity: Verbosity,
+) -> std::io::Result<()> {
+    match mapping_value {
+        Mapping::Character(character) => {
+            if let Some(&(keycode, modifier)) = chrmap.get(character) {
+                // Handle modifiers if necessary
+                if modifier == 1 {
+                    let shift_event = InputEvent::new(
+                        EventType::KEY,
+                        Key::KEY_LEFTSHIFT.code(),
+                        0,
+                    );
+                    virtual_keyboard.emit(&[shift_event])?;
+                }
+
+                let event = InputEvent::new(EventType::KEY, keycode.code(), 0);
+                virtual_keyboard.emit(&[event])?;
+
+                if verbosity >= Verbosity::Verbose {
+                    println!(
+                        "{:?} deactivated, releasing character '{}'",
+                        gamepad_input, character
+                    );
+                }
+            }
+        }
+        Mapping::Key(keycode) => {
+            let event = InputEvent::new(EventType::KEY, keycode.code(), 0);
+            virtual_keyboard.emit(&[event])?;
+
+            if verbosity >= Verbosity::Verbose {
+                println!(
+                    "{:?} deactivated, releasing key '{:?}'",
+                    gamepad_input, keycode
+                );
+            }
+        }
+    }
+    Ok(())
 }
