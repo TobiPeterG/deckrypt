@@ -487,7 +487,7 @@ fn get_mappings(
                 used_chars.insert(c);
                 if verbosity >= Verbosity::VeryVerbose {
                     println!(
-                        "Automatically assigned alternate mapping for {:?} to '{}'",
+                        "Automatically mapped gamepad input {:?} to character '{}' (alternate)",
                         gamepad_input, c
                     );
                 }
