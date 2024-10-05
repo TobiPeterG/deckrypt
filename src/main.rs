@@ -8,6 +8,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
+use std::fmt;
 
 // Include the toml crate in your Cargo.toml dependencies
 use toml::Value as TomlValue;
@@ -27,7 +28,7 @@ enum Direction {
     Negative,
 }
 
-#[derive(Hash, Eq, PartialEq, Debug, Clone)]
+#[derive(Hash, Eq, PartialEq, Clone)]
 enum GamepadInput {
     Button(Key),
     Axis(u16, Direction), // Use u16 instead of AbsoluteAxisType
@@ -79,6 +80,20 @@ fn kval(x: c_int) -> c_int {
 
 const KT_LATIN: c_int = 0;
 const KT_LETTER: c_int = 11;
+
+impl fmt::Debug for GamepadInput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GamepadInput::Button(key) => {
+                write!(f, "Button({:?})", key)
+            }
+            GamepadInput::Axis(axis_code, direction) => {
+                let axis_name = absolute_axis_type_to_name(*axis_code).unwrap_or("Unknown");
+                write!(f, "Axis({}, {:?})", axis_name, direction)
+            }
+        }
+    }
+}
 
 // Function to generate the character map
 fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char>)> {
@@ -356,9 +371,7 @@ fn get_mappings(
         .cloned()
         .collect();
 
-    let normal_numbers: Vec<char> = ('0'..='9')
-        .filter(|c| !used_chars.contains(c))
-        .collect();
+    let normal_numbers: Vec<char> = ('0'..='9').filter(|c| !used_chars.contains(c)).collect();
 
     let mut numbers_iter = normal_numbers.into_iter();
 
@@ -485,12 +498,17 @@ fn get_mappings(
     (normal_mapping, used_chars, alternate_mapping)
 }
 
-fn get_buttons_and_axes_from_config(config_file_path: &str) -> std::io::Result<(HashSet<Key>, HashSet<u16>)> {
+fn get_buttons_and_axes_from_config(
+    config_file_path: &str,
+) -> std::io::Result<(HashSet<Key>, HashSet<u16>)> {
     let mut file = File::open(config_file_path)?;
     let mut contents = String::new();
     file.read_to_string(&mut contents)?;
     let config = contents.parse::<TomlValue>().map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse config: {}", e))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to parse config: {}", e),
+        )
     })?;
 
     let mut buttons_in_config = HashSet::new();
@@ -501,8 +519,12 @@ fn get_buttons_and_axes_from_config(config_file_path: &str) -> std::io::Result<(
         for (key_name, _value) in buttons {
             if let Some(gamepad_input) = parse_gamepad_input(key_name) {
                 match gamepad_input {
-                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
-                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                    GamepadInput::Button(key) => {
+                        buttons_in_config.insert(key);
+                    }
+                    GamepadInput::Axis(axis, _) => {
+                        axes_in_config.insert(axis);
+                    }
                 }
             }
         }
@@ -522,8 +544,12 @@ fn get_buttons_and_axes_from_config(config_file_path: &str) -> std::io::Result<(
         for (key_name, _value) in buttons {
             if let Some(gamepad_input) = parse_gamepad_input(key_name) {
                 match gamepad_input {
-                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
-                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                    GamepadInput::Button(key) => {
+                        buttons_in_config.insert(key);
+                    }
+                    GamepadInput::Axis(axis, _) => {
+                        axes_in_config.insert(axis);
+                    }
                 }
             }
         }
@@ -542,16 +568,24 @@ fn get_buttons_and_axes_from_config(config_file_path: &str) -> std::io::Result<(
         if let Some(shift_key) = mods.get("shift_key").and_then(|v| v.as_str()) {
             if let Some(gamepad_input) = parse_gamepad_input(shift_key) {
                 match gamepad_input {
-                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
-                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                    GamepadInput::Button(key) => {
+                        buttons_in_config.insert(key);
+                    }
+                    GamepadInput::Axis(axis, _) => {
+                        axes_in_config.insert(axis);
+                    }
                 }
             }
         }
         if let Some(alternate_key) = mods.get("alternate_key").and_then(|v| v.as_str()) {
             if let Some(gamepad_input) = parse_gamepad_input(alternate_key) {
                 match gamepad_input {
-                    GamepadInput::Button(key) => { buttons_in_config.insert(key); },
-                    GamepadInput::Axis(axis, _) => { axes_in_config.insert(axis); },
+                    GamepadInput::Button(key) => {
+                        buttons_in_config.insert(key);
+                    }
+                    GamepadInput::Axis(axis, _) => {
+                        axes_in_config.insert(axis);
+                    }
                 }
             }
         }
@@ -618,7 +652,9 @@ fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u
                         for config_file_path in config_paths {
                             if fs::metadata(&config_file_path).is_ok() {
                                 // Now, get buttons and axes from config
-                                if let Ok((buttons_in_config, axes_in_config)) = get_buttons_and_axes_from_config(&config_file_path) {
+                                if let Ok((buttons_in_config, axes_in_config)) =
+                                    get_buttons_and_axes_from_config(&config_file_path)
+                                {
                                     // Get supported buttons and axes from device
                                     let mut supported_buttons = HashSet::new();
                                     if let Some(keys) = device.supported_keys() {
@@ -635,7 +671,8 @@ fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u
                                     }
 
                                     // Check if all buttons and axes in config are supported by device
-                                    let buttons_supported = buttons_in_config.is_subset(&supported_buttons);
+                                    let buttons_supported =
+                                        buttons_in_config.is_subset(&supported_buttons);
                                     let axes_supported = axes_in_config.is_subset(&supported_axes);
 
                                     if buttons_supported && axes_supported {
@@ -654,18 +691,25 @@ fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u
                                             println!("Device '{}' does not support all buttons/axes defined in config file '{}', skipping.", name, config_file_path);
 
                                             // Calculate and print unsupported buttons
-                                            let unsupported_buttons = buttons_in_config.difference(&supported_buttons);
+                                            let unsupported_buttons =
+                                                buttons_in_config.difference(&supported_buttons);
                                             for key in unsupported_buttons {
                                                 println!("Unsupported button: {:?}", key);
                                             }
 
                                             // Calculate and print unsupported axes
-                                            let unsupported_axes = axes_in_config.difference(&supported_axes);
+                                            let unsupported_axes =
+                                                axes_in_config.difference(&supported_axes);
                                             for axis_code in unsupported_axes {
-                                                if let Some(axis_name) = absolute_axis_type_to_name(*axis_code) {
+                                                if let Some(axis_name) =
+                                                    absolute_axis_type_to_name(*axis_code)
+                                                {
                                                     println!("Unsupported axis: {}", axis_name);
                                                 } else {
-                                                    println!("Unsupported axis code: {}", axis_code);
+                                                    println!(
+                                                        "Unsupported axis code: {}",
+                                                        axis_code
+                                                    );
                                                 }
                                             }
                                         }
@@ -674,7 +718,10 @@ fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u
                                 } else {
                                     // Failed to parse config file
                                     if verbosity >= Verbosity::Verbose {
-                                        println!("Failed to parse config file '{}', skipping", config_file_path);
+                                        println!(
+                                            "Failed to parse config file '{}', skipping",
+                                            config_file_path
+                                        );
                                     }
                                 }
                             }
@@ -763,10 +810,7 @@ fn load_controller_config(
 
     // Possible config file paths
     let config_paths = vec![
-        format!(
-            "/usr/share/deckrypt/{}_{}.toml",
-            vendor_id, product_id
-        ),
+        format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
         format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
     ];
 
@@ -816,9 +860,8 @@ fn load_controller_config(
                     }
 
                     // Parse alternate button mappings
-                    if let Some(buttons) = config
-                        .get("alternate_buttons")
-                        .and_then(|v| v.as_table())
+                    if let Some(buttons) =
+                        config.get("alternate_buttons").and_then(|v| v.as_table())
                     {
                         for (key_name, value) in buttons {
                             if let Some(mapping) = parse_mapping(value) {
@@ -830,10 +873,7 @@ fn load_controller_config(
                     }
 
                     // Parse alternate axis mappings
-                    if let Some(axes) = config
-                        .get("alternate_axes")
-                        .and_then(|v| v.as_table())
-                    {
+                    if let Some(axes) = config.get("alternate_axes").and_then(|v| v.as_table()) {
                         for (axis_name, value) in axes {
                             if let Some(axis_values) = value.as_table() {
                                 if let Some(neg_value) = axis_values.get("negative") {
@@ -865,9 +905,8 @@ fn load_controller_config(
                                 modifiers.shift_modifier = Some(mod_input);
                             }
                         }
-                        if let Some(alternate_key) = mods
-                            .get("alternate_key")
-                            .and_then(|v| v.as_str())
+                        if let Some(alternate_key) =
+                            mods.get("alternate_key").and_then(|v| v.as_str())
                         {
                             if let Some(mod_input) = parse_gamepad_input(alternate_key) {
                                 modifiers.alternate_modifier = Some(mod_input);
@@ -1013,10 +1052,8 @@ fn main() -> std::io::Result<()> {
     let additional_signs: Vec<char> = chrmap
         .iter()
         .filter(|&(c, &(_, modifier))| {
-            modifier == 0
-                && !c.is_ascii_alphanumeric()
-                && !c.is_whitespace()
-                && !c.is_control() // Exclude control characters
+            modifier == 0 && !c.is_ascii_alphanumeric() && !c.is_whitespace() && !c.is_control()
+            // Exclude control characters
         })
         .map(|(&c, _)| c)
         .collect();
@@ -1031,8 +1068,8 @@ fn main() -> std::io::Result<()> {
 
     // Start of main logic
     let vendor_id;
-let product_id;
-let device_path;
+    let product_id;
+    let device_path;
 
     if use_unknown {
         // List connected devices and prompt the user to select one
@@ -1046,11 +1083,7 @@ let device_path;
         for (i, (path, name, vendor_id, product_id)) in devices.iter().enumerate() {
             println!(
                 "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                i,
-                path,
-                name,
-                vendor_id,
-                product_id
+                i, path, name, vendor_id, product_id
             );
         }
 
@@ -1067,20 +1100,20 @@ let device_path;
                 device_path = path.clone();
                 vendor_id = vid;
                 product_id = pid;
-    
+
                 println!(
                     "Selected device: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
                     device_path, name, vendor_id, product_id
                 );
-    
+
                 println!(
                     "Config file name would be: {}_{}.toml",
                     vendor_id, product_id
                 );
-    
+
                 // Open the device
                 let device = Device::open(&device_path)?;
-    
+
                 // Print recognized buttons and axes
                 if let Some(keys) = device.supported_keys() {
                     println!("Supported buttons:");
@@ -1124,41 +1157,37 @@ let device_path;
                 vendor_id = vid;
                 product_id = pid;
             } else {
-            // Multiple devices found, prompt the user to select one
-            println!("Multiple devices with config files found:");
-            for (i, (path, name, vid, pid)) in devices.iter().enumerate() {
-                println!(
-                    "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                    i,
-                    path,
-                    name,
-                    vid,
-                    pid
-                );
-            }
-
-            print!("Enter the number of the device to use: ");
-            io::stdout().flush().unwrap();
-
-            let mut input = String::new();
-            io::stdin().read_line(&mut input)?;
-            let selection = input.trim().parse::<usize>();
-
-            match selection {
-                Ok(num) if num <= devices.len() => {
-                    let (path, _, vid, pid) = devices[num].clone();
-                    device_path = path;
-                    vendor_id = vid;
-                    product_id = pid;
+                // Multiple devices found, prompt the user to select one
+                println!("Multiple devices with config files found:");
+                for (i, (path, name, vid, pid)) in devices.iter().enumerate() {
+                    println!(
+                        "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                        i, path, name, vid, pid
+                    );
                 }
-                _ => {
-                    eprintln!("Invalid selection.");
-                    std::process::exit(1);
+
+                print!("Enter the number of the device to use: ");
+                io::stdout().flush().unwrap();
+
+                let mut input = String::new();
+                io::stdin().read_line(&mut input)?;
+                let selection = input.trim().parse::<usize>();
+
+                match selection {
+                    Ok(num) if num <= devices.len() => {
+                        let (path, _, vid, pid) = devices[num].clone();
+                        device_path = path;
+                        vendor_id = vid;
+                        product_id = pid;
+                    }
+                    _ => {
+                        eprintln!("Invalid selection.");
+                        std::process::exit(1);
+                    }
                 }
             }
         }
     }
-}
 
     // Open the selected device
     let mut gamepad_device = Device::open(&device_path)?;
@@ -1184,8 +1213,8 @@ let device_path;
         mut modifiers,
     ) = load_controller_config(vendor_id, product_id, verbosity);
 
-    let mut virtual_keyboard = create_virtual_keyboard(&all_keyboard_keys)
-        .expect("Failed to create virtual keyboard");
+    let mut virtual_keyboard =
+        create_virtual_keyboard(&all_keyboard_keys).expect("Failed to create virtual keyboard");
 
     let (normal_mapping, _used_chars, alternate_mapping) = get_mappings(
         &gamepad_device,
@@ -1209,7 +1238,10 @@ let device_path;
     }
 
     loop {
-        for ev in gamepad_device.fetch_events().expect("Failed to fetch events") {
+        for ev in gamepad_device
+            .fetch_events()
+            .expect("Failed to fetch events")
+        {
             match ev.kind() {
                 InputEventKind::Key(key) => {
                     let gamepad_input = GamepadInput::Button(key);
@@ -1218,11 +1250,8 @@ let device_path;
                     if Some(gamepad_input.clone()) == modifiers.shift_modifier {
                         // Handle shift modifier
                         let shift_value = ev.value();
-                        let shift_event = InputEvent::new(
-                            EventType::KEY,
-                            Key::KEY_LEFTSHIFT.code(),
-                            shift_value,
-                        );
+                        let shift_event =
+                            InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.code(), shift_value);
                         virtual_keyboard.emit(&[shift_event])?;
                         continue;
                     }
@@ -1262,8 +1291,10 @@ let device_path;
                                         virtual_keyboard.emit(&[event])?;
 
                                         // Record the mapping used
-                                        pressed_inputs
-                                            .insert(gamepad_input.clone(), modifiers.alternate_active);
+                                        pressed_inputs.insert(
+                                            gamepad_input.clone(),
+                                            modifiers.alternate_active,
+                                        );
 
                                         if verbosity >= Verbosity::Verbose {
                                             println!(
@@ -1358,11 +1389,8 @@ let device_path;
                     {
                         // Handle shift modifier
                         let shift_value = if axis_value != 0 { 1 } else { 0 };
-                        let shift_event = InputEvent::new(
-                            EventType::KEY,
-                            Key::KEY_LEFTSHIFT.code(),
-                            shift_value,
-                        );
+                        let shift_event =
+                            InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.code(), shift_value);
                         virtual_keyboard.emit(&[shift_event])?;
                         continue;
                     }
@@ -1502,11 +1530,7 @@ fn handle_mapping_activation(
             if let Some(&(keycode, modifier)) = chrmap.get(character) {
                 // Handle modifiers if necessary
                 if modifier == 1 {
-                    let shift_event = InputEvent::new(
-                        EventType::KEY,
-                        Key::KEY_LEFTSHIFT.code(),
-                        1,
-                    );
+                    let shift_event = InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.code(), 1);
                     virtual_keyboard.emit(&[shift_event])?;
                 }
 
@@ -1552,11 +1576,7 @@ fn handle_mapping_release(
             if let Some(&(keycode, modifier)) = chrmap.get(character) {
                 // Handle modifiers if necessary
                 if modifier == 1 {
-                    let shift_event = InputEvent::new(
-                        EventType::KEY,
-                        Key::KEY_LEFTSHIFT.code(),
-                        0,
-                    );
+                    let shift_event = InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.code(), 0);
                     virtual_keyboard.emit(&[shift_event])?;
                 }
 
