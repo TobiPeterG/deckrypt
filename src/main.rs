@@ -9,6 +9,7 @@ use std::io::{self, Read, Write};
 use std::os::unix::fs::FileTypeExt;
 use std::os::unix::io::AsRawFd;
 use std::fmt;
+use std::time::Duration;
 
 // Include the toml crate in your Cargo.toml dependencies
 use toml::Value as TomlValue;
@@ -735,11 +736,11 @@ fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u
     devices_with_config
 }
 
-fn list_connected_devices() -> Vec<(String, String, u16, u16)> {
+fn find_unknown_devices(verbosity: Verbosity) -> Vec<(String, String, u16, u16)> {
     let input_dir = "/dev/input";
     let entries = fs::read_dir(input_dir).expect("Failed to read /dev/input");
 
-    let mut devices = Vec::new();
+    let mut unknown_devices = Vec::new();
 
     for entry in entries {
         if let Ok(entry) = entry {
@@ -751,19 +752,34 @@ fn list_connected_devices() -> Vec<(String, String, u16, u16)> {
                         let name = device.name().unwrap_or("Unknown").to_string();
                         let vendor_id = device.input_id().vendor();
                         let product_id = device.input_id().product();
-                        devices.push((
-                            path.to_string_lossy().to_string(),
-                            name,
-                            vendor_id,
-                            product_id,
-                        ));
+
+                        // Possible config file paths
+                        let config_paths = vec![
+                            format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
+                            format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
+                        ];
+
+                        // Check if any config file exists
+                        let has_config = config_paths.iter().any(|path| fs::metadata(path).is_ok());
+
+                        if !has_config {
+                            unknown_devices.push((
+                                path.to_string_lossy().to_string(),
+                                name.clone(),
+                                vendor_id,
+                                product_id,
+                            ));
+                            if verbosity >= Verbosity::Verbose {
+                                println!("Found unknown device: {:?}", name);
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    devices
+    unknown_devices
 }
 
 // Helper function to parse gamepad input from string
@@ -994,7 +1010,7 @@ fn axis_name_to_absolute_axis_type(name: &str) -> Option<AbsoluteAxisType> {
 #[command(
     name = "Deckrypt",
     version = "0.1.0",
-    author = "Tobias Görgens <tobi.goergens@gmail.com>",
+    author = "Tobias Görgens <tobiasg-privat@proton.me>",
     about = "Map gamepad inputs to keyboard events",
     after_help = "Source: https://github.com/TobiPeterG/deckrypt",
     help_template = "\
@@ -1010,13 +1026,17 @@ struct Args {
     #[arg(short, action = clap::ArgAction::Count)]
     verbosity: u8,
 
-    /// Use unknown devices and prompt for selection
+    /// Use unknown devices and prompt for selection (not compatible with -a & -c)
     #[arg(short, long)]
     unknown: bool,
 
     /// Automatically select the first device if multiple devices are found (not compatible with -u)
     #[arg(short = 'a', long)]
     auto_select: bool,
+
+    /// Continuously search for devices with a config file (not compatible with -u)
+    #[arg(short = 'c', long)]
+    continuously_search: bool,
 }
 
 fn main() -> std::io::Result<()> {
@@ -1037,9 +1057,170 @@ fn main() -> std::io::Result<()> {
         std::process::exit(1);
     }
 
-    // Check if --unknown flag is set
-    let use_unknown = args.unknown;
+    if args.unknown && args.continuously_search {
+        eprintln!("--unknown does not support --continuously_search!");
+        std::process::exit(1);
+    }
 
+    // Function to attempt device selection based on current arguments
+    fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<(String, u16, u16)> {
+        if args.unknown {
+            // Unknown device selection logic
+            let devices = find_unknown_devices(verbosity);
+            if devices.is_empty() {
+                // No unknown devices found
+                None
+            } else {
+                // List all unknown devices and prompt user to select
+                println!("Found the following unknown devices:");
+                for (i, (path, name, vid, pid)) in devices.iter().enumerate() {
+                    println!(
+                        "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                        i, path, name, vid, pid
+                    );
+                }
+    
+                print!("Enter the number of the device to use: ");
+                io::stdout().flush().unwrap();
+    
+                let mut input = String::new();
+                if io::stdin().read_line(&mut input).is_err() {
+                    eprintln!("Failed to read input.");
+                    return None;
+                }
+                let selection = input.trim().parse::<usize>();
+    
+                match selection {
+                    Ok(num) if num < devices.len() => {
+                        let (path, _, vid, pid) = devices[num].clone();
+                        if verbosity >= Verbosity::Verbose {
+                            println!(
+                                "Selected unknown device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                                path, vid, pid
+                            );
+                        }
+                        Some((path, vid, pid))
+                    }
+                    _ => {
+                        eprintln!("Invalid selection.");
+                        None
+                    }
+                }
+            }
+        } else {
+            let devices = find_devices_with_config(verbosity);
+            if devices.is_empty() {
+                None
+            } else if devices.len() == 1 {
+                let (path, _, vid, pid) = devices.into_iter().next().unwrap();
+                if verbosity >= Verbosity::Verbose {
+                    println!(
+                        "Found device with config: {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                        path, vid, pid
+                    );
+                }
+                Some((path, vid, pid))
+            } else {
+                if args.auto_select {
+                    let (path, name, vid, pid) = devices[0].clone();
+                    if verbosity >= Verbosity::Verbose {
+                        println!(
+                            "Automatically selected device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                            name, vid, pid
+                        );
+                    }
+                    Some((path, vid, pid))
+                } else {
+                    // Prompt user to select device
+                    println!("Multiple devices with config files found:");
+                    for (i, (path, name, vid, pid)) in devices.iter().enumerate() {
+                        println!(
+                            "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                            i, path, name, vid, pid
+                        );
+                    }
+    
+                    print!("Enter the number of the device to use: ");
+                    io::stdout().flush().unwrap();
+    
+                    let mut input = String::new();
+                    if io::stdin().read_line(&mut input).is_err() {
+                        eprintln!("Failed to read input.");
+                        return None;
+                    }
+                    let selection = input.trim().parse::<usize>();
+    
+                    match selection {
+                        Ok(num) if num < devices.len() => {
+                            let (path, _, vid, pid) = devices[num].clone();
+                            Some((path, vid, pid))
+                        }
+                        _ => {
+                            eprintln!("Invalid selection.");
+                            None
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+
+    // Initialize device selection
+    let (device_path, vendor_id, product_id) = if args.continuously_search {
+        loop {
+            if let Some(selection) = attempt_device_selection(&args, verbosity) {
+                break selection;
+            } else {
+                if verbosity >= Verbosity::Verbose {
+                    if args.unknown {
+                        println!("No unknown devices found. Retrying in 1 seconds...");
+                    } else {
+                        println!("No devices with config files found. Retrying in 1 seconds...");
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(1));
+            }
+        }
+    } else {
+        match attempt_device_selection(&args, verbosity) {
+            Some(selection) => selection,
+            None => {
+                if args.unknown {
+                    eprintln!("No unknown devices found.");
+                } else {
+                    eprintln!("No devices with config files found.");
+                }
+                std::process::exit(1);
+            }
+        }
+    };
+
+    // Open the selected device
+    let mut gamepad_device = Device::open(&device_path)?;
+
+    // Get absolute axis information and store in a HashMap
+    let abs_info = gamepad_device.get_abs_state().ok();
+    let abs_info_map = abs_info.as_ref().map(|abs_info| {
+        let mut map = HashMap::new();
+        for (i, info) in abs_info.iter().enumerate() {
+            if info.maximum != 0 || info.minimum != 0 {
+                map.insert(i as u16, *info);
+            }
+        }
+        map
+    });
+
+    // Load controller-specific mappings and modifiers
+    let (
+        manual_mappings,
+        axis_mappings,
+        alternate_manual_mappings,
+        alternate_axis_mappings,
+        mut modifiers,
+    ) = load_controller_config(vendor_id, product_id, verbosity);
+
+    // Generate character map
     let (chrmap, _shifted_chars) = match generate_chrmap() {
         Some(maps) => maps,
         None => {
@@ -1066,156 +1247,11 @@ fn main() -> std::io::Result<()> {
     // Collect all keyboard keys used in chrmap
     let all_keyboard_keys: Vec<Key> = chrmap.values().map(|&(key, _)| key).collect();
 
-    // Start of main logic
-    let vendor_id;
-    let product_id;
-    let device_path;
-
-    if use_unknown {
-        // List connected devices and prompt the user to select one
-        let devices = list_connected_devices();
-        if devices.is_empty() {
-            eprintln!("No input devices found.");
-            std::process::exit(1);
-        }
-
-        println!("Available devices:");
-        for (i, (path, name, vendor_id, product_id)) in devices.iter().enumerate() {
-            println!(
-                "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                i, path, name, vendor_id, product_id
-            );
-        }
-
-        print!("Enter the number of the device to use: ");
-        io::stdout().flush().unwrap();
-
-        let mut input = String::new();
-        io::stdin().read_line(&mut input)?;
-        let selection = input.trim().parse::<usize>();
-
-        match selection {
-            Ok(num) if num <= devices.len() => {
-                let (ref path, ref name, vid, pid) = devices[num];
-                device_path = path.clone();
-                vendor_id = vid;
-                product_id = pid;
-
-                println!(
-                    "Selected device: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                    device_path, name, vendor_id, product_id
-                );
-
-                println!(
-                    "Config file name would be: {}_{}.toml",
-                    vendor_id, product_id
-                );
-
-                // Open the device
-                let device = Device::open(&device_path)?;
-
-                // Print recognized buttons and axes
-                if let Some(keys) = device.supported_keys() {
-                    println!("Supported buttons:");
-                    for key in keys.iter() {
-                        println!("{:?}", key);
-                    }
-                }
-                if let Some(axes) = device.supported_absolute_axes() {
-                    println!("Supported axes:");
-                    for axis in axes.iter() {
-                        println!("{:?}", axis);
-                    }
-                }
-            }
-            _ => {
-                eprintln!("Invalid selection.");
-                std::process::exit(1);
-            }
-        }
-    } else {
-        let devices = find_devices_with_config(verbosity);
-        if devices.is_empty() {
-            eprintln!("No devices with config files found.");
-            std::process::exit(1);
-        } else if devices.len() == 1 {
-            let (path, _, vid, pid) = devices.into_iter().next().unwrap();
-            device_path = path;
-            vendor_id = vid;
-            product_id = pid;
-        } else {
-            // Multiple devices found
-            if args.auto_select {
-                let (path, name, vid, pid) = devices[0].clone();
-                if verbosity >= Verbosity::Verbose {
-                    println!(
-                        "Automatically selected device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                        name, vid, pid
-                    );
-                }
-                device_path = path;
-                vendor_id = vid;
-                product_id = pid;
-            } else {
-                // Multiple devices found, prompt the user to select one
-                println!("Multiple devices with config files found:");
-                for (i, (path, name, vid, pid)) in devices.iter().enumerate() {
-                    println!(
-                        "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                        i, path, name, vid, pid
-                    );
-                }
-
-                print!("Enter the number of the device to use: ");
-                io::stdout().flush().unwrap();
-
-                let mut input = String::new();
-                io::stdin().read_line(&mut input)?;
-                let selection = input.trim().parse::<usize>();
-
-                match selection {
-                    Ok(num) if num <= devices.len() => {
-                        let (path, _, vid, pid) = devices[num].clone();
-                        device_path = path;
-                        vendor_id = vid;
-                        product_id = pid;
-                    }
-                    _ => {
-                        eprintln!("Invalid selection.");
-                        std::process::exit(1);
-                    }
-                }
-            }
-        }
-    }
-
-    // Open the selected device
-    let mut gamepad_device = Device::open(&device_path)?;
-
-    // Get absolute axis information and store in a HashMap
-    let abs_info = gamepad_device.get_abs_state().ok();
-    let abs_info_map = abs_info.as_ref().map(|abs_info| {
-        let mut map = HashMap::new();
-        for (i, info) in abs_info.iter().enumerate() {
-            if info.maximum != 0 || info.minimum != 0 {
-                map.insert(i as u16, *info);
-            }
-        }
-        map
-    });
-
-    // Load controller-specific mappings and modifiers
-    let (
-        manual_mappings,
-        axis_mappings,
-        alternate_manual_mappings,
-        alternate_axis_mappings,
-        mut modifiers,
-    ) = load_controller_config(vendor_id, product_id, verbosity);
-
+    // Create the virtual keyboard
     let mut virtual_keyboard =
         create_virtual_keyboard(&all_keyboard_keys).expect("Failed to create virtual keyboard");
 
+    // Get mappings
     let (normal_mapping, _used_chars, alternate_mapping) = get_mappings(
         &gamepad_device,
         &manual_mappings,
