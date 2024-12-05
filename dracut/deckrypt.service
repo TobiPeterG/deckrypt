@@ -1,0 +1,15 @@
+[Unit]
+Description=Start deckrypt to map gamepad actions to keyboard inputs
+DefaultDependencies=false
+Wants=cryptsetup-pre.target
+Before=cryptsetup-pre.target
+After=systemd-modules-load.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/deckrypt -a -c
+Restart=always
+RestartSec=1
+
+[Install]
+WantedBy=cryptsetup.target

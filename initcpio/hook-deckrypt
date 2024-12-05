@@ -1,9 +1,0 @@
-#!/usr/bin/bash
-
-run_hook() {
-    deckrypt &
-}
-
-run_cleanuphook() {
-    killall deckrypt
-}
