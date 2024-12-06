@@ -8,8 +8,16 @@ depends() {
     echo "base"
 }
 
+kmod_ins() {
+    modprobe -n "$1" 2>/dev/null
+}
+
 installkernel() {
-    hostonly="" instmods uinput xpad-noone
+    hostonly="" instmods uinput
+    
+    for i in xone xpad-noone xpad; do
+        ! kmod_ins "$i" || hostonly="" instmods "$i"
+    done
 }
 
 install() {
