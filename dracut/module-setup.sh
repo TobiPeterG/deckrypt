@@ -13,8 +13,7 @@ installkernel() {
 }
 
 install() {
-    # Include the deckrypt binary
-    inst /usr/lib/dracut/modules.d/90deckrypt/deckrypt /usr/bin/deckrypt
+    inst /usr/bin/deckrypt
 
     inst_simple "$moddir/deckrypt.service" "$systemdsystemunitdir/deckrypt.service"
     $SYSTEMCTL -q --root "$initdir" enable deckrypt.service
