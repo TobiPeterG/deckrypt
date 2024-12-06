@@ -12,6 +12,13 @@ kmod_ins() {
     modprobe -n "$1" 2>/dev/null
 }
 
+inst_conf() {
+if [ -d "$1" ] && [ ! -z "$( ls -A '$1' )" ]; then
+        inst "$1"
+        inst_multiple $(find "$1" -type f)
+    fi
+}
+
 installkernel() {
     hostonly="" instmods uinput
     
@@ -21,16 +28,10 @@ installkernel() {
 }
 
 install() {
-    inst /usr/bin/deckrypt
+    inst "/usr/bin/deckrypt"
 
     inst_simple "$moddir/deckrypt.service" "$systemdsystemunitdir/deckrypt.service"
-    $SYSTEMCTL -q --root "$initdir" enable deckrypt.service
-    if [ -d "/etc/deckrypt" ]; then
-        inst /etc/deckrypt /etc/deckrypt
-        inst_multiple $(find /etc/deckrypt -type f)
-    fi
-    if [ -d "/usr/share/deckrypt" ]; then
-        inst /usr/share/deckrypt /usr/share/deckrypt
-        inst_multiple $(find /usr/share/deckrypt -type f)
-    fi
+    $SYSTEMCTL -q --root "$initdir" enable "deckrypt.service"
+    inst_conf "/etc/deckrypt"
+    inst_conf "/usr/share/deckrypt"
 }
