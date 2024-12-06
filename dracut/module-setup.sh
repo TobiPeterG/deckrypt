@@ -13,7 +13,7 @@ kmod_ins() {
 }
 
 inst_conf() {
-if [ -d "$1" ] && [ ! -z "$( ls -A '$1' )" ]; then
+if [ -d "$1" ] && [ ! -z "$( ls -A "$1" )" ]; then
         inst "$1"
         inst_multiple $(find "$1" -type f)
     fi
