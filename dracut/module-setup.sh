@@ -9,7 +9,7 @@ depends() {
 }
 
 kmod_ins() {
-    modprobe -n "$1" 2>/dev/null
+    modinfo -k "$kernel" "$1" &>/dev/null
 }
 
 inst_conf() {
