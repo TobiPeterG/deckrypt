@@ -736,7 +736,7 @@ fn find_devices_with_config(verbosity: Verbosity) -> Vec<(String, String, u16, u
     devices_with_config
 }
 
-fn find_unknown_devices(verbosity: Verbosity) -> Vec<(String, String, u16, u16)> {
+fn find_unknown_devices() -> Vec<(String, String, u16, u16)> {
     let input_dir = "/dev/input";
     let entries = fs::read_dir(input_dir).expect("Failed to read /dev/input");
 
@@ -769,9 +769,6 @@ fn find_unknown_devices(verbosity: Verbosity) -> Vec<(String, String, u16, u16)>
                                 vendor_id,
                                 product_id,
                             ));
-                            if verbosity >= Verbosity::Verbose {
-                                println!("Found unknown device: {:?}", name);
-                            }
                         }
                     }
                 }
@@ -1062,7 +1059,7 @@ fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<(String
 
     if args.unknown {
         // Unknown device selection logic
-        let devices = find_unknown_devices(verbosity);
+        let devices = find_unknown_devices();
         if devices.is_empty() {
             // No unknown devices found
             return None;
