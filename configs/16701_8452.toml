@@ -1,16 +1,23 @@
 [buttons]
 BTN_MODE = 'ENTER'
 BTN_SOUTH = 'a'
-BTN_NORTH = 'b'
-BTN_WEST = 'c'
-BTN_EAST = 'd'
+BTN_NORTH = 'x'
+BTN_WEST = 'y'
+BTN_EAST = 'b'
 
 [alternate_buttons]
-BTN_MODE = 'ESCAPE'
+BTN_SOUTH = 'z'
+BTN_NORTH = 'c'
+BTN_WEST = 'd'
+BTN_EAST = 'w'
 
 [axes]
-ABS_X = { negative = 'a', positive = 'd' }
-ABS_Y = { negative = 'w', positive = 's' }
+ABS_X = { negative = 'e', positive = 'f' }
+ABS_Y = { negative = 'g', positive = 'h' }
+
+[alternate_axes]
+ABS_X = { negative = 'i', positive = 'j' }
+ABS_Y = { negative = 'k', positive = 'l' }
 
 [modifiers]
 shift_key = "BTN_TL"

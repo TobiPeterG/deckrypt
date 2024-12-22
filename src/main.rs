@@ -41,6 +41,7 @@ struct Modifiers {
     shift_modifier: Option<GamepadInput>,
     alternate_modifier: Option<GamepadInput>,
     alternate_active: bool,
+    shift_active: bool,
 }
 
 // Verbosity levels
@@ -258,6 +259,7 @@ fn get_mappings(
     HashMap<GamepadInput, Mapping>,
     HashSet<char>,
     HashMap<GamepadInput, Mapping>,
+    Option<GamepadInput>,
 ) {
     let mut normal_mapping = HashMap::new();
     let mut alternate_mapping = HashMap::new();
@@ -421,6 +423,14 @@ fn get_mappings(
         }
     }
 
+    let mut special_enter_input: Option<GamepadInput> = None;
+    for (inp, m) in &normal_mapping {
+        if let Mapping::Key(Key::KEY_ENTER) = m {
+            special_enter_input = Some(inp.clone());
+            break;
+        }
+    }
+
     // Now, create alternate mapping for inputs not already in alternate_mapping
 
     // Collect all gamepad inputs from normal_mapping
@@ -496,7 +506,19 @@ fn get_mappings(
         }
     }
 
-    (normal_mapping, used_chars, alternate_mapping)
+    if let Some(ref enter_inp) = special_enter_input {
+        if alternate_mapping.contains_key(enter_inp) {
+            eprintln!("Warning: The button assigned to ENTER in normal mode cannot be overridden in alternate mode. Ignoring that alternate mapping.");
+            alternate_mapping.remove(enter_inp);
+        }
+    }
+
+    (
+        normal_mapping,
+        used_chars,
+        alternate_mapping,
+        special_enter_input,
+    )
 }
 
 fn get_buttons_and_axes_from_config(
@@ -971,6 +993,7 @@ fn key_name_to_key(name: &str) -> Option<Key> {
     match name {
         "ENTER" => Some(Key::KEY_ENTER),
         "ESCAPE" => Some(Key::KEY_ESC),
+        "BACKSPACE" => Some(Key::KEY_BACKSPACE),
         "BTN_SOUTH" => Some(Key::BTN_SOUTH),
         "BTN_NORTH" => Some(Key::BTN_NORTH),
         "BTN_WEST" => Some(Key::BTN_WEST),
@@ -1229,7 +1252,7 @@ fn run_main_loop(args: &Args) -> std::io::Result<()> {
         create_virtual_keyboard(&all_keyboard_keys).expect("Failed to create virtual keyboard");
 
     // Build the normal/alternate mappings
-    let (normal_mapping, _used_chars, alternate_mapping) = get_mappings(
+    let (normal_mapping, _used_chars, alternate_mapping, special_enter_input) = get_mappings(
         &gamepad_device,
         &manual_mappings,
         &axis_mappings,
@@ -1260,13 +1283,7 @@ fn run_main_loop(args: &Args) -> std::io::Result<()> {
 
                             // Check shift_modifier
                             if Some(gamepad_input.clone()) == modifiers.shift_modifier {
-                                let shift_value = ev.value();
-                                let shift_event = InputEvent::new(
-                                    EventType::KEY,
-                                    Key::KEY_LEFTSHIFT.code(),
-                                    shift_value,
-                                );
-                                virtual_keyboard.emit(&[shift_event])?;
+                                modifiers.shift_active = ev.value() == 1;
                                 continue;
                             }
 
@@ -1275,6 +1292,48 @@ fn run_main_loop(args: &Args) -> std::io::Result<()> {
                                 modifiers.alternate_active = ev.value() == 1;
                                 continue;
                             }
+
+                            // If this button is our special "ENTER" input, handle custom logic:
+                            if Some(gamepad_input.clone()) == special_enter_input {
+
+                                // Decide which key to emit
+                                let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
+                                    Key::KEY_ESC
+                                } else if modifiers.shift_active || modifiers.alternate_active {
+                                    Key::KEY_BACKSPACE
+                                } else {
+                                    Key::KEY_ENTER
+                                };
+
+                                // Press or release
+                                let value = ev.value(); // 1 = pressed, 0 = released
+                                let event =
+                                    InputEvent::new(EventType::KEY, key_to_emit.code(), value);
+                                virtual_keyboard.emit(&[event])?;
+
+                                if verbosity >= Verbosity::Verbose {
+                                    if value == 1 {
+                                    println!(
+                                        "Button {:?} pressed, sending key '{:?}'",
+                                        key, key_to_emit
+                                    );
+                                } else {
+                                    println!(
+                                        "Button {:?} released, releasing key '{:?}'",
+                                        key, key_to_emit
+                                    );
+                                }
+                                }
+
+                                continue;
+                            }
+
+                            let shift_event = InputEvent::new(
+                                EventType::KEY,
+                                Key::KEY_LEFTSHIFT.code(),
+                                modifiers.shift_active as i32,
+                            );
+                            virtual_keyboard.emit(&[shift_event])?;
 
                             let is_pressed = ev.value() == 1;
 
@@ -1414,13 +1473,7 @@ fn run_main_loop(args: &Args) -> std::io::Result<()> {
                             if Some(gamepad_input_positive.clone()) == modifiers.shift_modifier
                                 || Some(gamepad_input_negative.clone()) == modifiers.shift_modifier
                             {
-                                let shift_value = if axis_value != 0 { 1 } else { 0 };
-                                let shift_event = InputEvent::new(
-                                    EventType::KEY,
-                                    Key::KEY_LEFTSHIFT.code(),
-                                    shift_value,
-                                );
-                                virtual_keyboard.emit(&[shift_event])?;
+                                modifiers.shift_active = axis_value != 0;
                                 continue;
                             }
 
@@ -1432,6 +1485,13 @@ fn run_main_loop(args: &Args) -> std::io::Result<()> {
                                 modifiers.alternate_active = axis_value != 0;
                                 continue;
                             }
+
+                            let shift_event = InputEvent::new(
+                                EventType::KEY,
+                                Key::KEY_LEFTSHIFT.code(),
+                                modifiers.shift_active as i32,
+                            );
+                            virtual_keyboard.emit(&[shift_event])?;
 
                             if let Some(abs_info) =
                                 abs_info_map.as_ref().and_then(|map| map.get(&axis.0))
