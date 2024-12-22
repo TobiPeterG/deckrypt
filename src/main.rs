@@ -1464,28 +1464,6 @@ fn run_main_loop(args: &Args) -> std::io::Result<()> {
                             let axis_value = ev.value();
                             let previous_value = axis_states.get(&axis.0).cloned().unwrap_or(0);
 
-                            // Check shift_modifier axis
-                            let gamepad_input_positive =
-                                GamepadInput::Axis(axis.0, Direction::Positive);
-                            let gamepad_input_negative =
-                                GamepadInput::Axis(axis.0, Direction::Negative);
-
-                            if Some(gamepad_input_positive.clone()) == modifiers.shift_modifier
-                                || Some(gamepad_input_negative.clone()) == modifiers.shift_modifier
-                            {
-                                modifiers.shift_active = axis_value != 0;
-                                continue;
-                            }
-
-                            // Check alternate_modifier axis
-                            if Some(gamepad_input_positive.clone()) == modifiers.alternate_modifier
-                                || Some(gamepad_input_negative.clone())
-                                    == modifiers.alternate_modifier
-                            {
-                                modifiers.alternate_active = axis_value != 0;
-                                continue;
-                            }
-
                             let shift_event = InputEvent::new(
                                 EventType::KEY,
                                 Key::KEY_LEFTSHIFT.code(),
