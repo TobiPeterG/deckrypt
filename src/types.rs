@@ -138,3 +138,8 @@ pub enum SelectedDevice {
     Known(KnownDeviceUnparsed),
     Unknown(UnknownDevice),
 }
+
+pub enum Action {
+    Activate,
+    Deactivate,
+}
