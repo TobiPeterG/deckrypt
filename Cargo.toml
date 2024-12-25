@@ -7,13 +7,13 @@ links = "keymap"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-clap = { version = "4.5.19", features = ["derive"] }
+clap = { version = "4.5.23", features = ["derive"] }
 env_logger = "0.11.6"
 evdev = "0.12.2"
-libc = "0.2.158"
+libc = "0.2.169"
 log = "0.4.22"
 sudo = "0.6.0"
 toml = "0.8.19"
 
 [build-dependencies]
-cc = "1.0"
+cc = "1.2"
