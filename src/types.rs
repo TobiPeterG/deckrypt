@@ -43,15 +43,6 @@ pub struct Modifiers {
     pub shift_active: bool,
 }
 
-/// Represents additional info for an axis currently pressed.  
-/// - `keycode`: The associated key in the virtual keyboard  
-/// - `level`: The modifier level (0 = none, 1 = shift, 2 = alt, etc.)
-#[derive(Clone, Debug)]
-pub struct PressedAxisInfo {
-    pub keycode: Key,
-    pub level: u8,
-}
-
 /// Used to track what's currently pressed.  
 /// This variant lets us handle either a character that might require SHIFT/ALT or a direct key press.
 #[derive(Clone, Debug)]
@@ -98,17 +89,6 @@ pub struct BuiltMappings {
     pub special_enter_input: Option<GamepadInput>,
 }
 
-/// Represents a single device that has a known config file path, but we have not yet parsed the config file.  
-/// This allows us to do a lazy load of the config if the user selects this device.
-#[derive(Clone)]
-pub struct DeviceWithConfig {
-    pub path: String,
-    pub name: String,
-    pub vendor_id: u16,
-    pub product_id: u16,
-    pub config: ControllerConfig,
-}
-
 /// Represents a "known" device that we've discovered has a config file, but the config hasn't been parsed yet.
 /// We only store the path to the config file here.
 #[derive(Clone)]
@@ -119,7 +99,7 @@ pub struct KnownDeviceUnparsed {
     pub product_id: u16,
     // We do *not* store the full parsed config here.
     // We only store the *file path* so we can parse it later if needed.
-    pub config_file_path: Option<String>,
+    pub config_file_path: String,
 }
 
 /// Represents an unknown device (no config found).  

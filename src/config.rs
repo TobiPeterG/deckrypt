@@ -95,215 +95,208 @@ pub fn parse_gamepad_input(input_str: &str) -> Option<GamepadInput> {
     }
 }
 
-pub fn parse_controller_config(vendor_id: u16, product_id: u16) -> Option<ControllerConfig> {
-    let config_paths = vec![
-        format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
-        format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
-    ];
+pub fn parse_controller_config(
+    vendor_id: u16,
+    product_id: u16,
+    config_file_path: String,
+) -> Option<ControllerConfig> {
+    if let Ok(mut file) = File::open(&config_file_path) {
+        let mut contents = String::new();
+        if let Ok(_) = file.read_to_string(&mut contents) {
+            if let Ok(toml_val) = contents.parse::<TomlValue>() {
+                // We'll build up the final ControllerConfig
+                let mut ctrl_cfg = ControllerConfig {
+                    required_buttons: HashSet::new(),
+                    required_axes: HashSet::new(),
+                    manual_mappings: vec![],
+                    axis_mappings: vec![],
+                    alternate_manual_mappings: vec![],
+                    alternate_axis_mappings: vec![],
+                    modifiers: Modifiers::default(),
+                    friendly_names: HashMap::new(),
+                };
 
-    for config_file_path in config_paths {
-        if let Ok(mut file) = File::open(&config_file_path) {
-            let mut contents = String::new();
-            if let Ok(_) = file.read_to_string(&mut contents) {
-                if let Ok(toml_val) = contents.parse::<TomlValue>() {
-                    // We'll build up the final ControllerConfig
-                    let mut ctrl_cfg = ControllerConfig {
-                        required_buttons: HashSet::new(),
-                        required_axes: HashSet::new(),
-                        manual_mappings: vec![],
-                        axis_mappings: vec![],
-                        alternate_manual_mappings: vec![],
-                        alternate_axis_mappings: vec![],
-                        modifiers: Modifiers::default(),
-                        friendly_names: HashMap::new(),
-                    };
-
-                    // parse "buttons"
-                    if let Some(buttons) = toml_val.get("buttons").and_then(|v| v.as_table()) {
-                        for (key_name, value) in buttons {
-                            if let Some(g_input) = parse_gamepad_input(key_name) {
-                                // add to "required_buttons" or "required_axes"
-                                match g_input {
-                                    GamepadInput::Button(k) => {
-                                        ctrl_cfg.required_buttons.insert(k);
-                                    }
-                                    GamepadInput::Axis(ax, _) => {
-                                        ctrl_cfg.required_axes.insert(ax);
-                                    }
+                // parse "buttons"
+                if let Some(buttons) = toml_val.get("buttons").and_then(|v| v.as_table()) {
+                    for (key_name, value) in buttons {
+                        if let Some(g_input) = parse_gamepad_input(key_name) {
+                            // add to "required_buttons" or "required_axes"
+                            match g_input {
+                                GamepadInput::Button(k) => {
+                                    ctrl_cfg.required_buttons.insert(k);
                                 }
-                                // also parse the mapping if present
-                                if let Some(mapping) = parse_mapping(value) {
-                                    ctrl_cfg.manual_mappings.push((g_input, mapping));
+                                GamepadInput::Axis(ax, _) => {
+                                    ctrl_cfg.required_axes.insert(ax);
                                 }
+                            }
+                            // also parse the mapping if present
+                            if let Some(mapping) = parse_mapping(value) {
+                                ctrl_cfg.manual_mappings.push((g_input, mapping));
                             }
                         }
                     }
-
-                    // parse "axes"
-                    if let Some(axes) = toml_val.get("axes").and_then(|v| v.as_table()) {
-                        for (axis_name, value) in axes {
-                            if let Some(axis_values) = value.as_table() {
-                                // We might have e.g. axes.ABS_X.negative, axes.ABS_X.positive
-                                // so parse "negative" => parse_gamepad_input("ABS_X_NEG") etc.
-                                if let Some(neg_value) = axis_values.get("negative") {
-                                    let neg_input_str = format!("{}_NEG", axis_name);
-                                    if let Some(gi) = parse_gamepad_input(&neg_input_str) {
-                                        match gi {
-                                            GamepadInput::Button(k) => {
-                                                ctrl_cfg.required_buttons.insert(k);
-                                            }
-                                            GamepadInput::Axis(ax, _) => {
-                                                ctrl_cfg.required_axes.insert(ax);
-                                            }
-                                        }
-                                        if let Some(mapping) = parse_mapping(neg_value) {
-                                            ctrl_cfg.axis_mappings.push((gi, mapping));
-                                        }
-                                    }
-                                }
-                                if let Some(pos_value) = axis_values.get("positive") {
-                                    let pos_input_str = format!("{}_POS", axis_name);
-                                    if let Some(gi) = parse_gamepad_input(&pos_input_str) {
-                                        match gi {
-                                            GamepadInput::Button(k) => {
-                                                ctrl_cfg.required_buttons.insert(k);
-                                            }
-                                            GamepadInput::Axis(ax, _) => {
-                                                ctrl_cfg.required_axes.insert(ax);
-                                            }
-                                        }
-                                        if let Some(mapping) = parse_mapping(pos_value) {
-                                            ctrl_cfg.axis_mappings.push((gi, mapping));
-                                        }
-                                    }
-                                }
-                            } else {
-                                // If it's not an object with "negative"/"positive",
-                                // maybe it’s a direct axis name
-                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
-                                {
-                                    ctrl_cfg.required_axes.insert(axis_type.0);
-                                }
-                            }
-                        }
-                    }
-
-                    // parse "alternate_buttons"
-                    if let Some(buttons) =
-                        toml_val.get("alternate_buttons").and_then(|v| v.as_table())
-                    {
-                        for (key_name, value) in buttons {
-                            if let Some(g_input) = parse_gamepad_input(key_name) {
-                                match g_input {
-                                    GamepadInput::Button(k) => {
-                                        ctrl_cfg.required_buttons.insert(k);
-                                    }
-                                    GamepadInput::Axis(ax, _) => {
-                                        ctrl_cfg.required_axes.insert(ax);
-                                    }
-                                }
-                                if let Some(mapping) = parse_mapping(value) {
-                                    ctrl_cfg.alternate_manual_mappings.push((g_input, mapping));
-                                }
-                            }
-                        }
-                    }
-
-                    // parse "alternate_axes"
-                    if let Some(axes) = toml_val.get("alternate_axes").and_then(|v| v.as_table()) {
-                        for (axis_name, value) in axes {
-                            if let Some(axis_values) = value.as_table() {
-                                if let Some(neg_value) = axis_values.get("negative") {
-                                    let neg_input_str = format!("{}_NEG", axis_name);
-                                    if let Some(gi) = parse_gamepad_input(&neg_input_str) {
-                                        match gi {
-                                            GamepadInput::Button(k) => {
-                                                ctrl_cfg.required_buttons.insert(k);
-                                            }
-                                            GamepadInput::Axis(ax, _) => {
-                                                ctrl_cfg.required_axes.insert(ax);
-                                            }
-                                        }
-                                        if let Some(mapping) = parse_mapping(neg_value) {
-                                            ctrl_cfg.alternate_axis_mappings.push((gi, mapping));
-                                        }
-                                    }
-                                }
-                                if let Some(pos_value) = axis_values.get("positive") {
-                                    let pos_input_str = format!("{}_POS", axis_name);
-                                    if let Some(gi) = parse_gamepad_input(&pos_input_str) {
-                                        match gi {
-                                            GamepadInput::Button(k) => {
-                                                ctrl_cfg.required_buttons.insert(k);
-                                            }
-                                            GamepadInput::Axis(ax, _) => {
-                                                ctrl_cfg.required_axes.insert(ax);
-                                            }
-                                        }
-                                        if let Some(mapping) = parse_mapping(pos_value) {
-                                            ctrl_cfg.alternate_axis_mappings.push((gi, mapping));
-                                        }
-                                    }
-                                }
-                            } else {
-                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
-                                {
-                                    ctrl_cfg.required_axes.insert(axis_type.0);
-                                }
-                            }
-                        }
-                    }
-
-                    // parse "modifiers"
-                    if let Some(mods) = toml_val.get("modifiers").and_then(|v| v.as_table()) {
-                        if let Some(shift_key) = mods.get("shift_key").and_then(|v| v.as_str()) {
-                            if let Some(mod_input) = parse_gamepad_input(shift_key) {
-                                // also add it to required sets
-                                match mod_input {
-                                    GamepadInput::Button(k) => {
-                                        ctrl_cfg.required_buttons.insert(k);
-                                    }
-                                    GamepadInput::Axis(ax, _) => {
-                                        ctrl_cfg.required_axes.insert(ax);
-                                    }
-                                }
-                                ctrl_cfg.modifiers.shift_modifier = Some(mod_input);
-                            }
-                        }
-                        if let Some(alternate_key) =
-                            mods.get("alternate_key").and_then(|v| v.as_str())
-                        {
-                            if let Some(mod_input) = parse_gamepad_input(alternate_key) {
-                                match mod_input {
-                                    GamepadInput::Button(k) => {
-                                        ctrl_cfg.required_buttons.insert(k);
-                                    }
-                                    GamepadInput::Axis(ax, _) => {
-                                        ctrl_cfg.required_axes.insert(ax);
-                                    }
-                                }
-                                ctrl_cfg.modifiers.alternate_modifier = Some(mod_input);
-                            }
-                        }
-                    }
-
-                    if let Some(friendly_names) =
-                        toml_val.get("friendly_names").and_then(|v| v.as_table())
-                    {
-                        for (key_name, value) in friendly_names {
-                            if let Some(name_str) = value.as_str() {
-                                if let Some(g_input) = parse_gamepad_input(key_name) {
-                                    ctrl_cfg
-                                        .friendly_names
-                                        .insert(g_input.clone(), name_str.to_string());
-                                }
-                            }
-                        }
-                    }
-                    debug!("Loaded config file from '{}'", config_file_path);
-
-                    return Some(ctrl_cfg);
                 }
+
+                // parse "axes"
+                if let Some(axes) = toml_val.get("axes").and_then(|v| v.as_table()) {
+                    for (axis_name, value) in axes {
+                        if let Some(axis_values) = value.as_table() {
+                            // We might have e.g. axes.ABS_X.negative, axes.ABS_X.positive
+                            // so parse "negative" => parse_gamepad_input("ABS_X_NEG") etc.
+                            if let Some(neg_value) = axis_values.get("negative") {
+                                let neg_input_str = format!("{}_NEG", axis_name);
+                                if let Some(gi) = parse_gamepad_input(&neg_input_str) {
+                                    match gi {
+                                        GamepadInput::Button(k) => {
+                                            ctrl_cfg.required_buttons.insert(k);
+                                        }
+                                        GamepadInput::Axis(ax, _) => {
+                                            ctrl_cfg.required_axes.insert(ax);
+                                        }
+                                    }
+                                    if let Some(mapping) = parse_mapping(neg_value) {
+                                        ctrl_cfg.axis_mappings.push((gi, mapping));
+                                    }
+                                }
+                            }
+                            if let Some(pos_value) = axis_values.get("positive") {
+                                let pos_input_str = format!("{}_POS", axis_name);
+                                if let Some(gi) = parse_gamepad_input(&pos_input_str) {
+                                    match gi {
+                                        GamepadInput::Button(k) => {
+                                            ctrl_cfg.required_buttons.insert(k);
+                                        }
+                                        GamepadInput::Axis(ax, _) => {
+                                            ctrl_cfg.required_axes.insert(ax);
+                                        }
+                                    }
+                                    if let Some(mapping) = parse_mapping(pos_value) {
+                                        ctrl_cfg.axis_mappings.push((gi, mapping));
+                                    }
+                                }
+                            }
+                        } else {
+                            // If it's not an object with "negative"/"positive",
+                            // maybe it’s a direct axis name
+                            if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
+                                ctrl_cfg.required_axes.insert(axis_type.0);
+                            }
+                        }
+                    }
+                }
+
+                // parse "alternate_buttons"
+                if let Some(buttons) = toml_val.get("alternate_buttons").and_then(|v| v.as_table())
+                {
+                    for (key_name, value) in buttons {
+                        if let Some(g_input) = parse_gamepad_input(key_name) {
+                            match g_input {
+                                GamepadInput::Button(k) => {
+                                    ctrl_cfg.required_buttons.insert(k);
+                                }
+                                GamepadInput::Axis(ax, _) => {
+                                    ctrl_cfg.required_axes.insert(ax);
+                                }
+                            }
+                            if let Some(mapping) = parse_mapping(value) {
+                                ctrl_cfg.alternate_manual_mappings.push((g_input, mapping));
+                            }
+                        }
+                    }
+                }
+
+                // parse "alternate_axes"
+                if let Some(axes) = toml_val.get("alternate_axes").and_then(|v| v.as_table()) {
+                    for (axis_name, value) in axes {
+                        if let Some(axis_values) = value.as_table() {
+                            if let Some(neg_value) = axis_values.get("negative") {
+                                let neg_input_str = format!("{}_NEG", axis_name);
+                                if let Some(gi) = parse_gamepad_input(&neg_input_str) {
+                                    match gi {
+                                        GamepadInput::Button(k) => {
+                                            ctrl_cfg.required_buttons.insert(k);
+                                        }
+                                        GamepadInput::Axis(ax, _) => {
+                                            ctrl_cfg.required_axes.insert(ax);
+                                        }
+                                    }
+                                    if let Some(mapping) = parse_mapping(neg_value) {
+                                        ctrl_cfg.alternate_axis_mappings.push((gi, mapping));
+                                    }
+                                }
+                            }
+                            if let Some(pos_value) = axis_values.get("positive") {
+                                let pos_input_str = format!("{}_POS", axis_name);
+                                if let Some(gi) = parse_gamepad_input(&pos_input_str) {
+                                    match gi {
+                                        GamepadInput::Button(k) => {
+                                            ctrl_cfg.required_buttons.insert(k);
+                                        }
+                                        GamepadInput::Axis(ax, _) => {
+                                            ctrl_cfg.required_axes.insert(ax);
+                                        }
+                                    }
+                                    if let Some(mapping) = parse_mapping(pos_value) {
+                                        ctrl_cfg.alternate_axis_mappings.push((gi, mapping));
+                                    }
+                                }
+                            }
+                        } else {
+                            if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
+                                ctrl_cfg.required_axes.insert(axis_type.0);
+                            }
+                        }
+                    }
+                }
+
+                // parse "modifiers"
+                if let Some(mods) = toml_val.get("modifiers").and_then(|v| v.as_table()) {
+                    if let Some(shift_key) = mods.get("shift_key").and_then(|v| v.as_str()) {
+                        if let Some(mod_input) = parse_gamepad_input(shift_key) {
+                            // also add it to required sets
+                            match mod_input {
+                                GamepadInput::Button(k) => {
+                                    ctrl_cfg.required_buttons.insert(k);
+                                }
+                                GamepadInput::Axis(ax, _) => {
+                                    ctrl_cfg.required_axes.insert(ax);
+                                }
+                            }
+                            ctrl_cfg.modifiers.shift_modifier = Some(mod_input);
+                        }
+                    }
+                    if let Some(alternate_key) = mods.get("alternate_key").and_then(|v| v.as_str())
+                    {
+                        if let Some(mod_input) = parse_gamepad_input(alternate_key) {
+                            match mod_input {
+                                GamepadInput::Button(k) => {
+                                    ctrl_cfg.required_buttons.insert(k);
+                                }
+                                GamepadInput::Axis(ax, _) => {
+                                    ctrl_cfg.required_axes.insert(ax);
+                                }
+                            }
+                            ctrl_cfg.modifiers.alternate_modifier = Some(mod_input);
+                        }
+                    }
+                }
+
+                if let Some(friendly_names) =
+                    toml_val.get("friendly_names").and_then(|v| v.as_table())
+                {
+                    for (key_name, value) in friendly_names {
+                        if let Some(name_str) = value.as_str() {
+                            if let Some(g_input) = parse_gamepad_input(key_name) {
+                                ctrl_cfg
+                                    .friendly_names
+                                    .insert(g_input.clone(), name_str.to_string());
+                            }
+                        }
+                    }
+                }
+                debug!("Loaded config file from '{}'", config_file_path);
+
+                return Some(ctrl_cfg);
             }
         }
     }

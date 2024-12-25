@@ -46,7 +46,7 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
                                 name: name.clone(),
                                 vendor_id,
                                 product_id,
-                                config_file_path: Some(cfpath.clone()),
+                                config_file_path: cfpath.clone(),
                             });
                             debug!("Found known device with config file presence: {}", name);
                         } else {

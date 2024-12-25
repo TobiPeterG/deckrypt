@@ -335,7 +335,12 @@ fn get_mappings(
         let available_symbols: Vec<char> = ALLOWED_CHARACTERS
             .iter()
             .cloned()
-            .filter(|c| !c.is_ascii_alphanumeric() && !c.is_whitespace() && !c.is_control() && !used_chars.contains(c))
+            .filter(|c| {
+                !c.is_ascii_alphanumeric()
+                    && !c.is_whitespace()
+                    && !c.is_control()
+                    && !used_chars.contains(c)
+            })
             .collect();
         let mut symbols_iter = available_symbols.into_iter();
         for gi in &remaining_gamepad_inputs {
@@ -781,7 +786,7 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
-                                        &modifiers
+                                        &modifiers,
                                     )?;
                                 }
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
@@ -791,7 +796,7 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
-                                        &modifiers
+                                        &modifiers,
                                     )?;
                                 }
                             }
@@ -865,16 +870,19 @@ pub fn run_main_loop(args: &crate::cli::Args) -> std::io::Result<()> {
         // User chose a known device => parse the config and proceed
         SelectedDevice::Known(kdev) => {
             // Parse the controller config
-            let parsed_cfg =
-                match crate::config::parse_controller_config(kdev.vendor_id, kdev.product_id) {
-                    Some(cfg) => cfg,
-                    None => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            "Failed to parse config for this device",
-                        ));
-                    }
-                };
+            let parsed_cfg = match crate::config::parse_controller_config(
+                kdev.vendor_id,
+                kdev.product_id,
+                kdev.config_file_path,
+            ) {
+                Some(cfg) => cfg,
+                None => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "Failed to parse config for this device",
+                    ));
+                }
+            };
 
             // Determine if automatic mapping should be enabled based on `-m`
             let auto_mapping_enabled = args.mapping;
