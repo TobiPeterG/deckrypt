@@ -1,79 +1,280 @@
 # Deckrypt
+
 Unlock a LUKS-encrypted root partition with game controller combinations.
 
-This is meant for people who want full disk encryption for devices like the Steam Deck.
+Deckrypt is designed for users who desire full disk encryption on devices like the Steam Deck.
 
-It consist of a Rust program that translates game controller combinations to a character sequence and then induces events as if the sequence was typed on a real keyboard. This sequence can then be added to a LUKS slot.
+Deckrypt is designed for users who desire full disk encryption on devices like the Steam Deck. It leverages a Rust-based application to translate game controller inputs into keyboard events, enabling the unlocking of encrypted partitions through specific controller combinations or traditional password entry.
 
-An initcpio hook provides this in early userspace to unlock root.
+## Table of Contents
 
-The advantage of this approach is that you can either use a controller combination to unlock the device **or** a regular password/keyboard.
+- [Deckrypt](#deckrypt)
+  - [Table of Contents](#table-of-contents)
+  - [Features](#features)
+  - [How It Works](#how-it-works)
+  - [Combinations](#combinations)
+    - [Input Mappings](#input-mappings)
+      - [Mapping Structure](#mapping-structure)
+      - [Example Mapping](#example-mapping)
+    - [Combination Structure](#combination-structure)
+    - [Sequence Formation](#sequence-formation)
+    - [The Enter key](#the-enter-key)
+  - [Security](#security)
+    - [Mapping Complexity](#mapping-complexity)
+    - [Entropy Calculation](#entropy-calculation)
+  - [Installation](#installation)
+  - [Configuration](#configuration)
+    - [Creating Configuration Files](#creating-configuration-files)
+    - [Supported categories](#supported-categories)
+  - [Automatic Mapping](#automatic-mapping)
+  - [Manual building](#manual-building)
+    - [Prerequisites](#prerequisites)
+    - [Building from Source](#building-from-source)
+  - [License](#license)
+  - [Contributing](#contributing)
+  - [Credits](#credits)
+
+## Features
+
+- **Game Controller Integration:** Use game controllers to unlock encrypted partitions.
+- **Automatic and Manual Mapping:** Automatically assign controller inputs to keyboard events or manually configure mappings.
+- **Friendly Logging:** Optional friendly names for easier identification of controller inputs.
+- **Flexible Configuration:** Support for multiple game controllers with individual configuration files.
+- **Security:** Combines multiple controller inputs to create secure unlocking sequences.
+
+## How It Works
+
+Deckrypt operates by mapping gamepad inputs to keyboard events. When a specific combination of buttons and axes on the controller is detected, Deckrypt generates corresponding keyboard events as if the sequence were typed on a physical keyboard. This sequence can then be added to a LUKS slot, allowing for secure unlocking of the encrypted partition using either the controller combination or a traditional password.
+
+A **dracut hook** ensures that Deckrypt operates in early userspace, enabling it to unlock the root partition during the boot process.
 
 ## Combinations
-When speaking of a button below, this also includes a direction with the D-pad or an analog stick. The four directions of these are simply translated to four "buttons".
 
-A combination consists of
-* any number of hold-buttons and
-* one tap-button.
+In Deckrypt, combinations are the fundamental units used to unlock a LUKS-encrypted root partition. Each combination translates specific gamepad inputs into keyboard events, allowing you to authenticate using your game controller. This section explains how combinations are structured and how they contribute to the overall security of your encrypted system.
 
-A button becomes a hold-button if it is pressed for at least a 250 ms. Hold-buttons have to be pressed before the tap-button to be part of the combination.
+### Input Mappings
 
-Combinations are separated by semicolons and thus build a sequence.
+Deckrypt employs a flexible mapping system where each gamepad input can represent multiple values based on active modifiers. This system enhances both usability and security by providing multiple layers of input interpretation.
 
-### Security
-Let's take a standard game contoller like the one from the PS2 or the Steam Deck and let's only use the thumbs and index fingers. Each of those fingers is restricted to their own set of reachable controls.
+#### Mapping Structure
 
-| Finger |Controls |
-| --- | --- |
-| Left Thumb | D-pad, Left Analog Stick |
-| Right Thumb | X/Y/A/B, Right Analog Stick |
-| Left Index | L1/L2 |
-| Right Index | R1/R2 |
+Each gamepad input (buttons and axes) can be mapped in the following ways:
 
-As mentioned above, a combination consists of any number of buttons held plus one final button to conclude the combination. Let's break down for every finger the number of buttons it can hold or tap.
+1. **Normal Mapping:** The default mapping when no modifiers are active.
+2. **Alternate Mapping:** An alternative mapping activated by the Alternate modifier.
+3. **Shift Modifier:** An additional modifier (like the Shift key) that changes the mapping when active (`a` becomes `A`, `1` becomes `!`).
+4. **Shift + Alternate:** Both Shift and Alternate modifiers active simultaneously.
 
-The left index finger for example can tap either L1 or L2 and hold either L1, L2 or no button at all.
+This results in four possible mappings for each gamepad input.
 
-The thumbs are a bit more complicated because of the D-pad/analog sticks. These are translated to four "buttons" each, which can be tapped. However, in terms of holding there are not just four "buttons" but rather eight directions.
+#### Example Mapping
 
-So the right thumb can tap the four buttons X/Y/A/B, four directions with the analog stick or clicking the analog stick itself, resulting in nine enumerations. It can hold either of X/Y/A/B, eight directions, holding the analog stick or none, which makes 14.
+Consider the following mappings for buttons:
 
-| Finger | Hold Enumerations | Tap Enumerations |
-| --- | --- | --- |
-| Left Thumb | 18 | 9 |
-| Right Thumb | 14 | 9 |
-| Left Index | 3 | 2 |
-| Right Index | 3 | 2 |
+| Gamepad Input | Normal | Shift | Alternate | Shift + Alternate |
+| --- | --- | --- | --- | --- |
+| BTN_A | 'a' | 'A' | '1' | '!' |
+| BTN_B | 'b' | 'B' | '2' | '@' |
+| BTN_X | 'x' | 'X' | '3' | '#' |
+| BTN_Y | 'y' | 'Y' | '4' | '$' |
 
-Take the above table as a matrix $A$. The overall number of possible combinations equals to
+Similarly, axes directions follow the same mapping logic:
 
-$$\sum_{i=1}^{n}\frac{p}{A_{i,1}}A_{i,2}=5616$$
+| Axis Input | Normal | Shift | Alternate | Shift + Alternate |
+| --- | --- | --- | --- | --- |
+| ABS_X_POS | 'd' | 'D' | '5' | '%' |
+| ABS_X_NEG | 'a' | 'A' | '1' | '!' |
+| ABS_Y_POS | 'w' | 'W' | '6' | '^' |
+| ABS_Y_NEG | 's' | 'S' | '2' | '@' |
 
-with
+### Combination Structure
 
-$$p=\prod_{i=1}^{n}A_{i,1}$$
+A combination consists of one or more gamepad inputs mapped under specific modifier states. Each combination contributes characters to an unlocking sequence, which is used to authenticate and unlock the encrypted partition.
 
-This means each randomly picked combination provides roughly 12.5 bits of entropy. A sequence of four or five combinations would already provide decent security.
+**Components of a Combination:**
 
-## Preparation
-Some things are hardcoded in `deckrypt_input.c` and need to be changed according to your controller and setup:
-* buttons that can be used for combinations
-* button to confirm
-* button to clear
+1. **Hold Inputs:**
+    - **Definition:** Inputs (buttons or axes) that are pressed and held.
+    - **Purpose:** Used to activate modifiers (Shift or Alternate).
+    - **Example:** Holding `BTN_SHIFT` to activate the Shift modifier.
 
-These will be matched with the Steam Deck once I get one (or a pull resquest).
+2. **Tap Input:**
+    - **Definition:** A single input pressed to conclude the combination.
+    - **Purpose:** Generates the corresponding character based on active modifiers.
+    - **Example:** Tapping `BTN_A` to produce `a`, `A`, `1`, or `!` depending on modifier states.
 
-`evtest` (available in the official repository) can be used to find a device and available buttons.
+### Sequence Formation
 
-It is highly recommended to setup LUKS with a normal password and then use deckrypt with another slot. See [cryptsetup(8)](https://man.archlinux.org/man/cryptsetup.8.en).
+Multiple combinations can be chained together to form a secure unlocking sequence. Each combination adds its mapped character to the sequence.
 
-## Dependencies
-* libevdev (official repos)
+**Example Sequence:**
+
+1. **Combination 1:** Hold `BTN_SHIFT`, tap `BTN_A` → `A`
+2. **Combination 2:** Tap `BTN_B` without modifiers → `b`
+3. **Combination 3:** Hold `BTN_ALT`, tap `BTN_X` → `3`
+4. **Combination 4:** Hold `BTN_ALT` + `BTN_SHIFT`, tap `BTN_Y`  → `$`
+
+**Final Unlocking Sequence:**
+`Ab3$`
+
+### The Enter key
+
+Since it is not only necessary to enter a sequence, but we also need to communicate that the sequence is complete, we need to have the possibility to press the `Enter` key. It is equally useful to have a way to remove the last character, a way to emit  ESC would also be nice. To realize this, Deckrypt supports the special mapping `ENTER`, which can be assigned to a button in normal mode. If this is set, the behavior of this button differs from the other assignments as follows:
+
+1. If this button is pressed **WITHOUT** a modifier key, an `ENTER` is emitted.
+2. If the key is pressed with **ONE** of the modifier keys, a `BACKSPACE` is emitted, which removes the last character entered.
+3. If the key is pressed with **BOTH** modifier keys, an `ESC` is emitted.
+
+This special behavior also means that a manual assignment for the alternate mode of this key is not possible and any manual assignment will be ignored.
+
+## Security
+
+Deckrypt's security is enhanced through the combination of multiple mappings and the use of modifiers, which exponentially increases the complexity and unpredictability of the unlocking sequence.
+
+### Mapping Complexity
+
+Each gamepad input can represent four distinct values based on the combination of modifiers, as described above.
+This multiplicity ensures that each input contributes multiple bits of entropy to the unlocking sequence.
+
+### Entropy Calculation
+
+**Allowed Characters:**
+Deckrypt utilizes a predefined set of allowed characters (`ALLOWED_CHARACTERS`), including:
+
+- **Letters:** `a`-`z` (26)
+- **Digits:** `0`-`9` (10)
+- **Symbols:** `-`, `=`, `[`, `]`, `\`, `;`, `'`, `,`, `.`, `/`, ```, ... (11)
+- **Shift variants:** `A`-`Z`, `!`, `@`, ... (47)
+
+**Total Unique Characters:**
+
+47 + 47 = 94
+
+**Bits per Character:**
+
+Each character provides approximately:
+$\log_2(94) ≈ 6.555...$ bits
+
+**Total Entropy:**
+
+The total entropy of an unlocking sequence is the sum of the entropy of each character in the sequence.
+
+**Example Calculation:**
+
+- **Single Combination:** `A` → 1 character →
+$1 \cdot 6.555 ≈ 6.555$ bits
+- **Four Combinations:** `Ab3$` → 4 characters →
+$4 \cdot 6.555 ≈ 26.22$ bits
+
+**Security Implications:**
+
+- **Higher Entropy:** Longer sequences with more characters exponentially increase the total entropy, making unauthorized access highly improbable.
+- **Brute-Force Resistance:** High entropy sequences render brute-force attacks computationally infeasible within a reasonable timeframe.
+
+By utilizing normal and alternate mappings along with modifier keys, Deckrypt ensures that each gamepad input contributes significantly to the overall security of the unlocking sequence. This design not only enhances security through increased entropy but also offers flexibility in configuring and using controller inputs for authentication.
+
+**A sequence of 9 or 10 combinations would already provide decent security.**
 
 ## Installation
-* Run `make` to build dependencies and the `deckrypt_input` binary.
-* Make `deckrypt_input` available in your path.
-* [Install the initcpio hooks](https://wiki.archlinux.org/title/Mkinitcpio#HOOKS).
-* Add `deckrypt` (directly before `encrypt`) in the `HOOKS`-line in `/etc/mkinitcpio.conf` and regenerate initramfs.
 
-(I will make an AUR package for these steps sometime.)
+A pre-built package for openSUSE based distributions is available [here](https://build.opensuse.org/package/show/devel:microos:yuga:unstable/deckrypt)
+
+## Configuration
+
+Deckrypt uses configuration files to map controller inputs to keyboard events. These configurations are typically located in `/etc/deckrypt/` or `/usr/share/deckrypt` and can be customized per device.
+
+### Creating Configuration Files
+
+1. Start deckrypt with the -u option to show devices unknown to deckrypt and increase logging
+
+```bash
+deckrypt -u -vvvv
+```
+
+1. Select your device
+2. Have a look at the automatic mapping. They show you the supported buttons and axes.
+3. Deckrypt outputs how the config file would be called and where to place it. Have a look at the config files under [configs](./configs)
+
+### Supported categories
+
+- **Buttons:** Map each button to a character or special key.
+- **Axes:** Define mappings for axis directions.
+- **Alternate Mappings:** Provide alternate mappings for different modifier states.
+- **Modifiers:** Define which inputs act as modifiers (Currently a "shift" action and an alternate mode are supported).
+- **Friendly Names:** Optional, for more readable logs and outputs.
+
+## Automatic Mapping
+
+If you prefer Deckrypt to automatically assign mappings to unassigned controller inputs:
+
+- **Enable Automatic Mapping:** Use the -m or --mapping flag when running Deckrypt.
+
+Deckrypt will assign available controller inputs to allowed characters sequentially, ensuring no conflicts with manual mappings.
+
+However, please note these automatic mappings might not always be stable, so different runs of deckrypt might produce different mappings!
+The automatic mapping is mainly thought for debugging and initial testing of a new controller.
+
+## Manual building
+
+### Prerequisites
+
+Ensure that the following dependencies are installed on your system:
+
+- **Rust Toolchain:** For building the application.
+- **libevdev:** Library for handling input events.
+- **Dracut:** For initramfs generation.
+- **Cargo-Packaging:** For packaging the Rust application.
+- **kbd-devel:** For creating the kernel keymap
+
+On openSUSE, you can install the necessary dependencies using zypper:
+
+```bash
+sudo zypper install cargo cargo-packaging rust libevdev-devel kbd-devel pkgconfig dracut
+```
+
+### Building from Source
+
+1. Clone the Repository:
+
+```bash
+git clone https://github.com/TobiPeterG/deckrypt.git
+cd deckrypt
+```
+
+1. Build the Application
+
+```bash
+cargo build --release
+```
+
+1. Install the Binary
+
+```bash
+sudo cp target/release/deckrypt /usr/local/bin/
+```
+
+1. Install Configuration Files and Dracut Modules
+
+```bash
+sudo mkdir -p /etc/deckrypt
+sudo cp configs/*.toml /etc/deckrypt/
+sudo cp dracut/modules.d/50deckrypt/* /usr/lib/dracut/modules.d/50deckrypt/
+```
+
+1. rebuild initrd
+
+```bash
+dracut -f
+```
+
+## License
+
+This project is licensed under the [GPL-3.0](LICENSE) License.
+
+## Contributing
+
+Contributions are welcome! Please fork the repository and submit pull requests for any enhancements or bug fixes. For major changes, please open an issue first to discuss your ideas.
+
+## Credits
+
+This is based on the idea of [pmkap/deckrypt](https://github.com/pmkap/deckrypt).
