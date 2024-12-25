@@ -1,10 +1,11 @@
+use crate::keymap::ALLOWED_CHARACTERS;
 use crate::types::ControllerConfig;
 use std::collections::HashSet;
 use std::io::Read;
 use std::{collections::HashMap, fs::File};
 
 use evdev::{AbsoluteAxisType, Key};
-use log::{debug, trace};
+use log::{debug, trace, warn};
 use toml::Value as TomlValue;
 
 use crate::types::{Direction, GamepadInput, Mapping, Modifiers};
@@ -12,9 +13,15 @@ use crate::types::{Direction, GamepadInput, Mapping, Modifiers};
 /// Parse a `Mapping` from a TOML value.
 pub fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
     if let Some(s) = value.as_str() {
-        // single character or known special key
+        // Single character or known special key
         if s.len() == 1 {
-            return Some(Mapping::Character(s.chars().next().unwrap()));
+            let c = s.chars().next().unwrap();
+            if ALLOWED_CHARACTERS.contains(&c) {
+                return Some(Mapping::Character(c));
+            } else {
+                warn!("Character '{}' is not allowed and will be ignored.", c);
+                return None;
+            }
         } else if let Some(key) = key_name_to_key(s) {
             return Some(Mapping::Key(key));
         }

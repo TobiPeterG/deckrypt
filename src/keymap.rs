@@ -124,35 +124,52 @@ pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char
     }
 }
 
-/// Returns the reversed character for letters/digits.  
-/// - a..z -> z..a, A..Z -> Z..A, 0..9 -> 9..0  
-/// Otherwise returns the same character.
-pub fn get_reversed_char(c: char) -> char {
-    if c.is_ascii_lowercase() {
-        let offset = c as u8 - b'a';
-        let reversed = b'z' - offset;
-        reversed as char
-    } else if c.is_ascii_uppercase() {
-        let offset = c as u8 - b'A';
-        let reversed = b'Z' - offset;
-        reversed as char
-    } else if c.is_ascii_digit() {
-        let offset = c as u8 - b'0';
-        let reversed = b'9' - offset;
-        reversed as char
-    } else {
-        c
-    }
-}
+/// A list of characters that are allowed to be mapped.
+// This list should include all characters handled by `shift_transform`.
+pub const ALLOWED_CHARACTERS: &[char] = &[
+    // Letters
+    'a','b','c','d','e','f','g','h','i','j','k','l','m',
+    'n','o','p','q','r','s','t','u','v','w','x','y','z',
+    
+    // Digits
+    '1','2','3','4','5','6','7','8','9','0',
+    
+    // Common Symbols
+    '-', '=', '[', ']', '\\', ';', '\'', ',', '.', '/', '`',
+    // Add more symbols here if `shift_transform` is expanded
+];
 
-/// Example transform that applies SHIFT to certain characters:
-/// - `a..z` -> uppercase  
-/// - `.` -> `:`  
-/// - everything else remains unchanged.
+/// Transforms a character to its shifted counterpart.
+/// 
+/// This function mimics the behavior of holding down the Shift key on a standard US QWERTY keyboard.
+/// It handles:
+/// - Lowercase letters to uppercase letters.
+/// - Numbers to their corresponding symbols.
+/// - Common symbols to their shifted versions.
+/// 
+/// # Parameters
+/// - `c`: The input character to be transformed.
+///
+/// # Returns
+/// - The shifted character if a mapping exists; otherwise, returns the original character.
 pub fn shift_transform(c: char) -> char {
     match c {
+        // Letters: a-z -> A-Z
         'a'..='z' => (c as u8 - b'a' + b'A') as char,
-        '.' => ':',
+
+        // Numbers: 0-9 to corresponding symbols
+        '1' => '!', '2' => '@', '3' => '#', '4' => '$',
+        '5' => '%', '6' => '^', '7' => '&', '8' => '*',
+        '9' => '(', '0' => ')',
+
+        // Symbols: Map to their shifted counterparts
+        '-' => '_', '=' => '+',
+        '[' => '{', ']' => '}', '\\' => '|',
+        ';' => ':', '\'' => '"',
+        ',' => '<', '.' => '>', '/' => '?',
+        '`' => '~',
+
+        // Space and other non-mappable characters remain unchanged
         _ => c,
     }
 }

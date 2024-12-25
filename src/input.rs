@@ -8,7 +8,7 @@ use evdev::{
     Device, EventType, InputEvent, InputEventKind, Key,
 };
 
-use crate::keymap::{generate_chrmap, get_reversed_char, shift_transform};
+use crate::keymap::{generate_chrmap, shift_transform, ALLOWED_CHARACTERS};
 use crate::types::{
     Action, BuiltMappings, ControllerConfig, Direction, GamepadInput, Mapping, Modifiers,
     PressedMapping, SelectedDevice,
@@ -149,7 +149,9 @@ fn handle_mapping_release(
     mapping_value: &Mapping,
     vk: &mut VirtualDevice,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
+    modifiers: &Modifiers,
 ) -> io::Result<()> {
+    let shift_active = modifiers.shift_active == true;
     if let Some(pressed) = pressed_axes.remove(gamepad_input) {
         match pressed {
             PressedMapping::Character { keycode, level } => {
@@ -163,7 +165,10 @@ fn handle_mapping_release(
             }
         }
         match mapping_value {
-            Mapping::Character(mapping_value) => {
+            Mapping::Character(mut mapping_value) => {
+                if shift_active {
+                    mapping_value = shift_transform(mapping_value);
+                }
                 debug!("Deactivated {:?} ({})", gamepad_input, mapping_value)
             }
             Mapping::Key(mapping_value) => {
@@ -185,8 +190,6 @@ fn handle_mapping_release(
 fn get_mappings(
     device: &Device,
     config: &ControllerConfig,
-    normal_chars_iter: impl Iterator<Item = char> + Clone,
-    additional_signs: &[char],
     abs_info_map: Option<&HashMap<u16, input_absinfo>>,
 
     // Controls whether we auto-map leftover inputs:
@@ -284,8 +287,9 @@ fn get_mappings(
     // -------------------------------
     if auto_mapping_enabled {
         // 3) Assign a..z
-        let normal_letters: Vec<char> = normal_chars_iter
-            .clone()
+        let normal_letters: Vec<char> = ALLOWED_CHARACTERS
+            .iter()
+            .cloned()
             .filter(|c| c.is_ascii_lowercase() && !used_chars.contains(c))
             .collect();
 
@@ -306,7 +310,11 @@ fn get_mappings(
             .filter(|gi| !normal_mapping.contains_key(*gi))
             .cloned()
             .collect();
-        let normal_numbers: Vec<char> = ('0'..='9').filter(|c| !used_chars.contains(c)).collect();
+        let normal_numbers: Vec<char> = ALLOWED_CHARACTERS
+            .iter()
+            .cloned()
+            .filter(|c| c.is_ascii_digit() && !used_chars.contains(c))
+            .collect();
         let mut numbers_iter = normal_numbers.into_iter();
         for gi in &remaining_gamepad_inputs {
             if let Some(next_char) = numbers_iter.next() {
@@ -324,10 +332,10 @@ fn get_mappings(
             .filter(|gi| !normal_mapping.contains_key(*gi))
             .cloned()
             .collect();
-        let available_symbols: Vec<char> = additional_signs
+        let available_symbols: Vec<char> = ALLOWED_CHARACTERS
             .iter()
             .cloned()
-            .filter(|c| !used_chars.contains(c))
+            .filter(|c| !c.is_ascii_alphanumeric() && !c.is_whitespace() && !c.is_control() && !used_chars.contains(c))
             .collect();
         let mut symbols_iter = available_symbols.into_iter();
         for gi in &remaining_gamepad_inputs {
@@ -364,51 +372,17 @@ fn get_mappings(
             }
         }
 
-        let unmapped_gamepad_inputs: Vec<_> = all_gamepad_inputs
+        // Collect all available characters for alternate mapping in the correct order
+        let mut alternate_chars_iter = ALLOWED_CHARACTERS
             .iter()
-            .filter(|gi| !alternate_mapping.contains_key(*gi))
             .cloned()
-            .collect();
+            .filter(|c| !used_chars.contains(c))
+            .collect::<Vec<char>>()
+            .into_iter();
 
-        for gi in &unmapped_gamepad_inputs {
-            // Only assign if it has a normal char
-            if let Some(Mapping::Character(normal_char)) = normal_mapping.get(gi) {
-                let mut assigned_char = None;
-
-                // 1) Try reversed char if it's a letter
-                if normal_char.is_ascii_lowercase() || normal_char.is_ascii_uppercase() {
-                    let opposite_char = get_reversed_char(*normal_char);
-                    if !used_chars.contains(&opposite_char) {
-                        assigned_char = Some(opposite_char);
-                    }
-                }
-
-                // 2) If still None, we assign *some* leftover char
-                if assigned_char.is_none() {
-                    let mut fallback_chars = Vec::new();
-                    // leftover letters, a..z, A..Z
-                    fallback_chars.extend(
-                        ('a'..='z')
-                            .chain('A'..='Z')
-                            .filter(|c| !used_chars.contains(c)),
-                    );
-                    // leftover digits, 0..9
-                    fallback_chars.extend(('0'..='9').filter(|c| !used_chars.contains(c)));
-                    // leftover symbols
-                    fallback_chars.extend(
-                        additional_signs
-                            .iter()
-                            .cloned()
-                            .filter(|c| !used_chars.contains(c)),
-                    );
-
-                    if let Some(c) = fallback_chars.pop() {
-                        assigned_char = Some(c);
-                    }
-                }
-
-                // 3) If we found a char, insert it
-                if let Some(c) = assigned_char {
+        for gi in &available_gamepad_inputs {
+            if !alternate_mapping.contains_key(gi) {
+                if let Some(c) = alternate_chars_iter.next() {
                     alternate_mapping.insert(gi.clone(), Mapping::Character(c));
                     used_chars.insert(c);
                     trace!("Alternate mapped {:?} -> '{}'", gi, c);
@@ -580,20 +554,6 @@ fn handle_device(
         }
     };
 
-    // Gather additional signs from kernel keymap
-    let additional_signs: Vec<char> = chrmap
-        .iter()
-        .filter(|&(c, &(_, m))| {
-            m == 0 && !c.is_ascii_alphanumeric() && !c.is_whitespace() && !c.is_control()
-        })
-        .map(|(&c, _)| c)
-        .collect();
-
-    // Build normal chars
-    let normal_chars = ('a'..='z')
-        .chain('0'..='9')
-        .chain(additional_signs.clone().into_iter());
-
     // Gather all keys from chrmap
     let all_keyboard_keys: Vec<Key> = chrmap.values().map(|&(k, _)| k).collect();
 
@@ -604,8 +564,6 @@ fn handle_device(
     let built = get_mappings(
         &gamepad_device,
         config,
-        normal_chars,
-        &additional_signs,
         abs_info_map.as_ref(),
         auto_mapping_enabled,
     );
@@ -823,6 +781,7 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
+                                        &modifiers
                                     )?;
                                 }
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
@@ -832,6 +791,7 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
+                                        &modifiers
                                     )?;
                                 }
                             }
