@@ -1,4 +1,5 @@
 use libc::input_absinfo;
+use log::{debug, error, trace};
 use std::collections::{HashMap, HashSet};
 use std::io;
 
@@ -10,7 +11,7 @@ use evdev::{
 use crate::keymap::{generate_chrmap, get_reversed_char, shift_transform};
 use crate::types::{
     BuiltMappings, ControllerConfig, Direction, GamepadInput, Mapping, Modifiers, PressedMapping,
-    SelectedDevice, Verbosity,
+    SelectedDevice,
 };
 
 /// We keep the same threshold logic for axes. The axis value must exceed a certain percentage  
@@ -129,7 +130,6 @@ fn handle_mapping_activation(
     virtual_keyboard: &mut VirtualDevice,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
     modifiers: &Modifiers,
-    verbosity: Verbosity,
 ) -> std::io::Result<()> {
     match mapping_value {
         Mapping::Character(mut ch) => {
@@ -149,17 +149,13 @@ fn handle_mapping_activation(
                     },
                 );
             }
-            if verbosity >= Verbosity::Verbose {
-                println!("Activated {:?} ({})", gamepad_input, ch);
-            }
+            debug!("Activated {:?} ({})", gamepad_input, ch);
         }
         Mapping::Key(kc) => {
             let e = InputEvent::new(EventType::KEY, kc.code(), 1);
             virtual_keyboard.emit(&[e])?;
             pressed_axes.insert(gamepad_input.clone(), PressedMapping::Key(*kc));
-            if verbosity >= Verbosity::Verbose {
-                println!("Activated {:?} ({:?})", gamepad_input, kc);
-            }
+            debug!("Activated {:?} ({:?})", gamepad_input, kc);
         }
     }
     Ok(())
@@ -172,7 +168,6 @@ fn handle_mapping_release(
     mapping_value: &Mapping,
     vk: &mut VirtualDevice,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
-    verbosity: Verbosity,
 ) -> io::Result<()> {
     if let Some(pressed) = pressed_axes.remove(gamepad_input) {
         match pressed {
@@ -186,16 +181,14 @@ fn handle_mapping_release(
                 vk.emit(&[evt])?;
             }
         }
-        if verbosity >= Verbosity::Verbose {
-            match mapping_value {
-                Mapping::Character(mapping_value) => {
-                    println!("Deactivated {:?} ({})", gamepad_input, mapping_value)
-                }
-                Mapping::Key(mapping_value) => {
-                    println!("Deactivated {:?} ({:?})", gamepad_input, mapping_value)
-                }
-            };
-        }
+        match mapping_value {
+            Mapping::Character(mapping_value) => {
+                debug!("Deactivated {:?} ({})", gamepad_input, mapping_value)
+            }
+            Mapping::Key(mapping_value) => {
+                debug!("Deactivated {:?} ({:?})", gamepad_input, mapping_value)
+            }
+        };
     }
     Ok(())
 }
@@ -214,7 +207,6 @@ fn get_mappings(
     normal_chars_iter: impl Iterator<Item = char> + Clone,
     additional_signs: &[char],
     abs_info_map: Option<&HashMap<u16, input_absinfo>>,
-    verbosity: Verbosity,
 
     // Controls whether we auto-map leftover inputs:
     auto_mapping_enabled: bool,
@@ -321,9 +313,7 @@ fn get_mappings(
             if let Some(next_char) = normal_chars_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
-                if verbosity >= Verbosity::VeryVerbose {
-                    println!("Automatically mapped {:?} -> '{}'", gi, next_char);
-                }
+                trace!("Automatically mapped {:?} -> '{}'", gi, next_char);
             } else {
                 break;
             }
@@ -341,9 +331,7 @@ fn get_mappings(
             if let Some(next_char) = numbers_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
-                if verbosity >= Verbosity::VeryVerbose {
-                    println!("Automatically mapped {:?} -> '{}'", gi, next_char);
-                }
+                trace!("Automatically mapped {:?} -> '{}'", gi, next_char);
             } else {
                 break;
             }
@@ -365,9 +353,7 @@ fn get_mappings(
             if let Some(next_char) = symbols_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
-                if verbosity >= Verbosity::VeryVerbose {
-                    println!("Automatically mapped {:?} -> '{}'", gi, next_char);
-                }
+                trace!("Automatically mapped {:?} -> '{}'", gi, next_char);
             } else {
                 break;
             }
@@ -444,9 +430,7 @@ fn get_mappings(
                 if let Some(c) = assigned_char {
                     alternate_mapping.insert(gi.clone(), Mapping::Character(c));
                     used_chars.insert(c);
-                    if verbosity >= Verbosity::VeryVerbose {
-                        println!("Alternate mapped {:?} -> '{}'", gi, c);
-                    }
+                    trace!("Alternate mapped {:?} -> '{}'", gi, c);
                 }
             }
         }
@@ -454,7 +438,7 @@ fn get_mappings(
         // Ensure special_enter_input is not overridden in alternate mapping
         if let Some(ref enter_inp) = special_enter_input {
             if alternate_mapping.contains_key(enter_inp) {
-                eprintln!(
+                error!(
                     "Warning: The button assigned to ENTER in normal mode cannot be overridden in alternate mode."
                 );
                 alternate_mapping.remove(enter_inp);
@@ -478,7 +462,6 @@ fn get_mappings(
 /// - `device_path`: The file system path to the input device.
 /// - `config`: The controller configuration (either parsed or ephemeral).
 /// - `auto_mapping_enabled`: Flag indicating whether to enable automatic mapping.
-/// - `verbosity`: The verbosity level for logging.
 /// - `friendly`: Flag indicating whether to use friendly names in logs.
 ///
 /// # Returns
@@ -487,7 +470,6 @@ fn handle_device(
     device_path: &str,
     config: &ControllerConfig,
     auto_mapping_enabled: bool,
-    verbosity: Verbosity,
     friendly: bool,
 ) -> io::Result<()> {
     // Open the device
@@ -509,7 +491,7 @@ fn handle_device(
     let (chrmap, _shifted_chars) = match generate_chrmap() {
         Some(maps) => maps,
         None => {
-            eprintln!("Failed to generate character map.");
+            error!("Failed to generate character map.");
             std::process::exit(1);
         }
     };
@@ -541,7 +523,6 @@ fn handle_device(
         normal_chars,
         &additional_signs,
         abs_info_map.as_ref(),
-        verbosity,
         auto_mapping_enabled,
     );
     let normal_mapping = built.normal_mapping;
@@ -561,9 +542,7 @@ fn handle_device(
         None => "SHIFT".to_string(),
     };
 
-    if verbosity >= Verbosity::Verbose {
-        println!("Listening for gamepad events...");
-    }
+    debug!("Listening for gamepad events...");
 
     // Main event loop
     loop {
@@ -575,18 +554,18 @@ fn handle_device(
                     // Handle modifiers
                     if Some(gamepad_input.clone()) == config.modifiers.shift_modifier {
                         modifiers.shift_active = ev.value() == 1;
-                        if verbosity >= Verbosity::Verbose && friendly {
+                        if friendly {
                             let friendly_name = config
                                 .friendly_names
                                 .get(&gamepad_input)
                                 .unwrap_or(&"SHIFT".to_string())
                                 .clone();
-                            println!(
+                            debug!(
                                 "{} {} (SHIFT)",
                                 if modifiers.shift_active {
-                                    "Pressed"
+                                    "Activated"
                                 } else {
-                                    "Released"
+                                    "Deactivated"
                                 },
                                 friendly_name
                             );
@@ -595,18 +574,18 @@ fn handle_device(
                     }
                     if Some(gamepad_input.clone()) == config.modifiers.alternate_modifier {
                         modifiers.alternate_active = ev.value() == 1;
-                        if verbosity >= Verbosity::Verbose && friendly {
+                        if friendly {
                             let friendly_name = config
                                 .friendly_names
                                 .get(&gamepad_input)
                                 .unwrap_or(&"ALTERNATE".to_string())
                                 .clone();
-                            println!(
+                            debug!(
                                 "{} {} (ALTERNATE)",
                                 if modifiers.alternate_active {
-                                    "Pressed"
+                                    "Activated"
                                 } else {
-                                    "Released"
+                                    "Deactivated"
                                 },
                                 friendly_name
                             );
@@ -626,12 +605,10 @@ fn handle_device(
                         let val = ev.value();
                         let e = InputEvent::new(EventType::KEY, key_to_emit.code(), val);
                         virtual_keyboard.emit(&[e])?;
-                        if verbosity >= Verbosity::Verbose {
-                            let action = if val == 1 { "Activated" } else { "Deactivated" };
-                            let key_str =
-                                get_display_name(&gamepad_input, &config.friendly_names, friendly);
-                            println!("{} {} ({:?})", action, key_str, key_to_emit);
-                        }
+                        let action = if val == 1 { "Activated" } else { "Deactivated" };
+                        let key_str =
+                            get_display_name(&gamepad_input, &config.friendly_names, friendly);
+                        debug!("{} {} ({:?})", action, key_str, key_to_emit);
                         continue;
                     }
 
@@ -673,9 +650,7 @@ fn handle_device(
                                             println!("{}", log_str);
                                         }
                                     }
-                                    if verbosity >= Verbosity::Verbose {
-                                        println!("Activated {:?} ({})", gamepad_input, ch);
-                                    }
+                                    debug!("Activated {:?} ({})", gamepad_input, ch);
                                 }
                                 Mapping::Key(kc) => {
                                     let e = InputEvent::new(EventType::KEY, kc.code(), 1);
@@ -697,9 +672,7 @@ fn handle_device(
                                         }
                                         println!("{}", log_str);
                                     }
-                                    if verbosity >= Verbosity::Verbose {
-                                        println!("Activated {:?} ({:?})", gamepad_input, e);
-                                    }
+                                    debug!("Activated {:?} ({:?})", gamepad_input, e);
                                 }
                             }
                         }
@@ -723,16 +696,12 @@ fn handle_device(
                                             virtual_keyboard.emit(&[e])?;
                                             release_kernel_modifier(lvl, &mut virtual_keyboard)?;
                                         }
-                                        if verbosity >= Verbosity::Verbose {
-                                            println!("Deactivated {:?} ({})", gamepad_input, ch);
-                                        }
+                                        debug!("Deactivated {:?} ({})", gamepad_input, ch);
                                     }
                                     Mapping::Key(kc) => {
                                         let e = InputEvent::new(EventType::KEY, kc.code(), 0);
                                         virtual_keyboard.emit(&[e])?;
-                                        if verbosity >= Verbosity::Verbose {
-                                            println!("Deactivated {:?} ({:?})", gamepad_input, e);
-                                        }
+                                        debug!("Deactivated {:?} ({:?})", gamepad_input, e);
                                     }
                                 }
                             }
@@ -765,7 +734,6 @@ fn handle_device(
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
                                         &modifiers,
-                                        verbosity,
                                     )?;
 
                                     if friendly == true {
@@ -799,7 +767,6 @@ fn handle_device(
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
                                         &modifiers,
-                                        verbosity,
                                     )?;
                                     if friendly == true {
                                         let display_name = get_display_name(
@@ -827,7 +794,6 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
-                                        verbosity,
                                     )?;
                                 }
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
@@ -837,7 +803,6 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
-                                        verbosity,
                                     )?;
                                 }
                             }
@@ -861,12 +826,11 @@ fn handle_device(
 ///
 /// # Parameters
 /// - `args`: Parsed command-line arguments.
-/// - `verbosity`: The verbosity level for logging.
 ///
 /// # Returns
 /// - `io::Result<()>`: Returns `Ok(())` on success or an `io::Error` on failure.
-pub fn run_main_loop(args: &crate::cli::Args, verbosity: Verbosity) -> std::io::Result<()> {
-    let selection = match crate::device::attempt_device_selection(args, verbosity) {
+pub fn run_main_loop(args: &crate::cli::Args) -> std::io::Result<()> {
+    let selection = match crate::device::attempt_device_selection(args) {
         Some(s) => s,
         None => {
             return Err(io::Error::new(
@@ -905,7 +869,6 @@ pub fn run_main_loop(args: &crate::cli::Args, verbosity: Verbosity) -> std::io::
                 &unk.path,
                 &ephemeral_cfg,
                 /* auto_mapping_enabled = */ true,
-                verbosity,
                 args.friendly,
             )
         }
@@ -913,31 +876,22 @@ pub fn run_main_loop(args: &crate::cli::Args, verbosity: Verbosity) -> std::io::
         // User chose a known device => parse the config and proceed
         SelectedDevice::Known(kdev) => {
             // Parse the controller config
-            let parsed_cfg = match crate::config::parse_controller_config(
-                kdev.vendor_id,
-                kdev.product_id,
-                verbosity,
-            ) {
-                Some(cfg) => cfg,
-                None => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::Other,
-                        "Failed to parse config for this device",
-                    ));
-                }
-            };
+            let parsed_cfg =
+                match crate::config::parse_controller_config(kdev.vendor_id, kdev.product_id) {
+                    Some(cfg) => cfg,
+                    None => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "Failed to parse config for this device",
+                        ));
+                    }
+                };
 
             // Determine if automatic mapping should be enabled based on `-m`
             let auto_mapping_enabled = args.mapping;
 
             // Handle the device with the appropriate mapping flag
-            handle_device(
-                &kdev.path,
-                &parsed_cfg,
-                auto_mapping_enabled,
-                verbosity,
-                args.friendly,
-            )
+            handle_device(&kdev.path, &parsed_cfg, auto_mapping_enabled, args.friendly)
         }
     }
 }

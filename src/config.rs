@@ -1,12 +1,13 @@
-use std::{collections::HashMap, fs::File};
-use std::io::Read;
-use std::collections::HashSet;
 use crate::types::ControllerConfig;
+use std::collections::HashSet;
+use std::io::Read;
+use std::{collections::HashMap, fs::File};
 
+use evdev::{AbsoluteAxisType, Key};
+use log::{debug, trace};
 use toml::Value as TomlValue;
-use evdev::{Key, AbsoluteAxisType};
 
-use crate::types::{GamepadInput, Mapping, Direction, Modifiers, Verbosity};
+use crate::types::{Direction, GamepadInput, Mapping, Modifiers};
 
 /// Parse a `Mapping` from a TOML value.
 pub fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
@@ -87,12 +88,7 @@ pub fn parse_gamepad_input(input_str: &str) -> Option<GamepadInput> {
     }
 }
 
-pub fn parse_controller_config(
-    vendor_id: u16,
-    product_id: u16,
-    verbosity: Verbosity,
-) -> Option<ControllerConfig> {
-
+pub fn parse_controller_config(vendor_id: u16, product_id: u16) -> Option<ControllerConfig> {
     let config_paths = vec![
         format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
         format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
@@ -175,9 +171,10 @@ pub fn parse_controller_config(
                                     }
                                 }
                             } else {
-                                // If it's not an object with "negative"/"positive", 
+                                // If it's not an object with "negative"/"positive",
                                 // maybe it’s a direct axis name
-                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
+                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
+                                {
                                     ctrl_cfg.required_axes.insert(axis_type.0);
                                 }
                             }
@@ -185,7 +182,9 @@ pub fn parse_controller_config(
                     }
 
                     // parse "alternate_buttons"
-                    if let Some(buttons) = toml_val.get("alternate_buttons").and_then(|v| v.as_table()) {
+                    if let Some(buttons) =
+                        toml_val.get("alternate_buttons").and_then(|v| v.as_table())
+                    {
                         for (key_name, value) in buttons {
                             if let Some(g_input) = parse_gamepad_input(key_name) {
                                 match g_input {
@@ -240,7 +239,8 @@ pub fn parse_controller_config(
                                     }
                                 }
                             } else {
-                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
+                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
+                                {
                                     ctrl_cfg.required_axes.insert(axis_type.0);
                                 }
                             }
@@ -263,7 +263,9 @@ pub fn parse_controller_config(
                                 ctrl_cfg.modifiers.shift_modifier = Some(mod_input);
                             }
                         }
-                        if let Some(alternate_key) = mods.get("alternate_key").and_then(|v| v.as_str()) {
+                        if let Some(alternate_key) =
+                            mods.get("alternate_key").and_then(|v| v.as_str())
+                        {
                             if let Some(mod_input) = parse_gamepad_input(alternate_key) {
                                 match mod_input {
                                     GamepadInput::Button(k) => {
@@ -284,15 +286,14 @@ pub fn parse_controller_config(
                         for (key_name, value) in friendly_names {
                             if let Some(name_str) = value.as_str() {
                                 if let Some(g_input) = parse_gamepad_input(key_name) {
-                                    ctrl_cfg.friendly_names.insert(g_input.clone(), name_str.to_string());
+                                    ctrl_cfg
+                                        .friendly_names
+                                        .insert(g_input.clone(), name_str.to_string());
                                 }
                             }
                         }
                     }
-
-                    if verbosity >= Verbosity::Verbose {
-                        println!("Loaded config file from '{}'", config_file_path);
-                    }
+                    debug!("Loaded config file from '{}'", config_file_path);
 
                     return Some(ctrl_cfg);
                 }
@@ -300,11 +301,10 @@ pub fn parse_controller_config(
         }
     }
 
-    if verbosity >= Verbosity::VeryVerbose {
-        println!(
-            "No config file found for controller {}_{}",
-            vendor_id, product_id
-        );
-    }
+    trace!(
+        "No config file found for controller {}_{}",
+        vendor_id,
+        product_id
+    );
     None
 }

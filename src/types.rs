@@ -4,17 +4,6 @@ use std::{
     fmt,
 };
 
-/// Defines how verbose the logs should be.  
-/// - `Quiet`: No logs except errors  
-/// - `Verbose`: Show informational logs  
-/// - `VeryVerbose`: Show detailed logs and debug information
-#[derive(PartialEq, PartialOrd, Clone, Copy)]
-pub enum Verbosity {
-    Quiet,
-    Verbose,
-    VeryVerbose,
-}
-
 /// Represents the direction for an axis input (e.g., negative or positive).
 #[derive(Hash, Eq, PartialEq, Debug, Clone)]
 pub enum Direction {
@@ -69,16 +58,6 @@ pub struct PressedAxisInfo {
 pub enum PressedMapping {
     Character { keycode: Key, level: u8 },
     Key(Key),
-}
-
-/// Determines verbosity level based on a count (e.g., how many times `-v` was specified).
-/// Returns `Verbosity::Quiet` for 0, `Verbosity::Verbose` for 1, and `Verbosity::VeryVerbose` otherwise.
-pub fn determine_verbosity(count: u8) -> Verbosity {
-    match count {
-        0 => Verbosity::Quiet,
-        1 => Verbosity::Verbose,
-        _ => Verbosity::VeryVerbose,
-    }
 }
 
 /// Custom Debug implementation to print more concise axis info, e.g. `Axis(ABS_X, Negative)` or `Button(KEY_ENTER)`.

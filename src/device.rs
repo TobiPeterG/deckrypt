@@ -1,18 +1,17 @@
 use evdev::Device;
+use log::{debug, error};
 use std::fs;
 use std::os::unix::fs::FileTypeExt;
 
 use crate::cli::Args;
-use crate::types::{KnownDeviceUnparsed, SelectedDevice, UnknownDevice, Verbosity};
+use crate::types::{KnownDeviceUnparsed, SelectedDevice, UnknownDevice};
 
 /// Scans `/dev/input` for devices and checks if each device has a corresponding Deckrypt config file.
 ///  
 /// Returns two lists:  
 /// - `Vec<KnownDeviceUnparsed>` for devices that have a matching config file
 /// - `Vec<UnknownDevice>` for devices that do not have a config file
-pub fn scan_devices_for_config(
-    verbosity: Verbosity,
-) -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice>) {
+pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice>) {
     let input_dir = "/dev/input";
     let entries = fs::read_dir(input_dir).expect("Failed to read /dev/input");
 
@@ -49,9 +48,7 @@ pub fn scan_devices_for_config(
                                 product_id,
                                 config_file_path: Some(cfpath.clone()),
                             });
-                            if verbosity >= Verbosity::Verbose {
-                                println!("Found known device with config file presence: {}", name);
-                            }
+                            debug!("Found known device with config file presence: {}", name);
                         } else {
                             // no file found => unknown
                             unknown.push(UnknownDevice {
@@ -80,15 +77,15 @@ pub fn scan_devices_for_config(
 ///  
 /// Returns `Some(SelectedDevice::Known(...))` or `Some(SelectedDevice::Unknown(...))` on success,
 /// or `None` if no device could be selected.
-pub fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<SelectedDevice> {
+pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
     use std::io::{self, Write};
 
-    let (known_devices, unknown_devices) = scan_devices_for_config(verbosity);
+    let (known_devices, unknown_devices) = scan_devices_for_config();
 
     // if user wants unknown
     if args.unknown {
         if unknown_devices.is_empty() {
-            eprintln!("No unknown devices found!");
+            error!("No unknown devices found!");
             return None;
         } else {
             // List them and pick
@@ -103,23 +100,21 @@ pub fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<Sel
             io::stdout().flush().unwrap();
             let mut input = String::new();
             if io::stdin().read_line(&mut input).is_err() {
-                eprintln!("Failed to read input.");
+                error!("Failed to read input.");
                 return None;
             }
             let selection = input.trim().parse::<usize>();
             match selection {
                 Ok(num) if num < unknown_devices.len() => {
                     let chosen = unknown_devices[num].clone();
-                    if verbosity >= crate::types::Verbosity::Verbose {
-                        println!(
-                            "Selected unknown device: {} (VID {:04x}, PID {:04x})",
-                            chosen.path, chosen.vendor_id, chosen.product_id
-                        );
-                    }
+                    debug!(
+                        "Selected unknown device: {} (VID {:04x}, PID {:04x})",
+                        chosen.path, chosen.vendor_id, chosen.product_id
+                    );
                     Some(SelectedDevice::Unknown(chosen))
                 }
                 _ => {
-                    eprintln!("Invalid selection.");
+                    error!("Invalid selection.");
                     None
                 }
             }
@@ -130,23 +125,19 @@ pub fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<Sel
             return None;
         } else if known_devices.len() == 1 {
             let dev = known_devices[0].clone();
-            if verbosity >= crate::types::Verbosity::Verbose {
-                println!(
-                    "Found device with config: {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                    dev.path, dev.vendor_id, dev.product_id
-                );
-            }
+            debug!(
+                "Found device with config: {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                dev.path, dev.vendor_id, dev.product_id
+            );
             Some(SelectedDevice::Known(dev))
         } else {
             // multiple => either auto_select or prompt
             if args.auto_select {
                 let dev = known_devices[0].clone();
-                if verbosity >= crate::types::Verbosity::Verbose {
-                    println!(
-                        "Automatically selected device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                        dev.name, dev.vendor_id, dev.product_id
-                    );
-                }
+                debug!(
+                    "Automatically selected device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
+                    dev.name, dev.vendor_id, dev.product_id
+                );
                 Some(SelectedDevice::Known(dev))
             } else {
                 println!("Multiple known devices with config files found:");
@@ -160,7 +151,7 @@ pub fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<Sel
                 io::stdout().flush().unwrap();
                 let mut input = String::new();
                 if io::stdin().read_line(&mut input).is_err() {
-                    eprintln!("Failed to read input.");
+                    error!("Failed to read input.");
                     return None;
                 }
                 let selection = input.trim().parse::<usize>();
@@ -170,7 +161,7 @@ pub fn attempt_device_selection(args: &Args, verbosity: Verbosity) -> Option<Sel
                         Some(SelectedDevice::Known(chosen_dev))
                     }
                     _ => {
-                        eprintln!("Invalid selection.");
+                        error!("Invalid selection.");
                         None
                     }
                 }

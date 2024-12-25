@@ -17,7 +17,7 @@ use clap::Parser;
 "
 )]
 pub struct Args {
-    /// Increases verbosity level (-v, -vv)
+    /// Increases verbosity level (-v, ..., -vvvv)
     #[arg(short, action = clap::ArgAction::Count)]
     pub verbosity: u8,
 
@@ -33,13 +33,8 @@ pub struct Args {
     #[arg(short = 'c', long)]
     pub continuously_search: bool,
 
-    /// Enables automatic mapping for unassigned inputs in known devices.
-    /// If this is not set, unassigned inputs remain unmapped unless -u is used.
-    #[arg(
-        short = 'm',
-        long = "mapping",
-        help = "Automatically map unassigned gamepad inputs"
-    )]
+    /// Automatically map unassigned gamepad inputs
+    #[arg(short = 'm', long)]
     pub mapping: bool,
 
     /// Enable friendly logging output

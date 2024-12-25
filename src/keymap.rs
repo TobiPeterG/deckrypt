@@ -1,4 +1,5 @@
 use libc::{c_int, getuid};
+use log::error;
 use std::collections::HashMap;
 use std::fs::File;
 use std::os::unix::io::AsRawFd;
@@ -63,7 +64,7 @@ pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char
         }
     }
     if fd.is_none() {
-        eprintln!(
+        error!(
             "Needs to run on tty/console or as root to read the kernel keymap. Cannot read keymap."
         );
         return None;
@@ -73,12 +74,12 @@ pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char
     unsafe {
         let ctx = lk_init();
         if ctx.is_null() {
-            eprintln!("Failed to initialize libkeymap context");
+            error!("Failed to initialize libkeymap context");
             return None;
         }
 
         if lk_kernel_keymap(ctx, fd.as_raw_fd()) != 0 {
-            eprintln!("Failed to read kernel keymap");
+            error!("Failed to read kernel keymap");
             lk_free(ctx);
             return None;
         }
