@@ -101,6 +101,25 @@ fn get_axis_thresholds(abs_info: &input_absinfo) -> (i32, i32) {
     (activation_threshold, release_threshold)
 }
 
+/// Retrieves the display name for a given `GamepadInput`.
+/// - If `friendly` is `true` and a friendly name exists, it returns the friendly name.
+/// - Otherwise, it returns the `Debug` representation of `GamepadInput`.
+fn get_display_name(
+    gamepad_input: &GamepadInput,
+    friendly_names: &HashMap<GamepadInput, String>,
+    friendly: bool,
+) -> String {
+    if friendly {
+        if let Some(name) = friendly_names.get(gamepad_input) {
+            name.clone()
+        } else {
+            format!("{:?}", gamepad_input)
+        }
+    } else {
+        format!("{:?}", gamepad_input)
+    }
+}
+
 /// Handles activation of a mapping (e.g., axis crossing threshold).  
 /// This could be pressing a character or a special key, taking into account SHIFT if it’s active.
 fn handle_mapping_activation(
@@ -108,9 +127,9 @@ fn handle_mapping_activation(
     mapping_value: &Mapping,
     chrmap: &HashMap<char, (Key, u8)>,
     virtual_keyboard: &mut VirtualDevice,
-    verbosity: Verbosity,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
     modifiers: &Modifiers,
+    verbosity: Verbosity,
 ) -> std::io::Result<()> {
     match mapping_value {
         Mapping::Character(mut ch) => {
@@ -129,12 +148,9 @@ fn handle_mapping_activation(
                         level: lvl,
                     },
                 );
-                if verbosity >= Verbosity::Verbose {
-                    println!(
-                        "{:?} axis activated => '{}', lvl={}",
-                        gamepad_input, ch, lvl
-                    );
-                }
+            }
+            if verbosity >= Verbosity::Verbose {
+                println!("Activated {:?} ({})", gamepad_input, ch);
             }
         }
         Mapping::Key(kc) => {
@@ -142,7 +158,7 @@ fn handle_mapping_activation(
             virtual_keyboard.emit(&[e])?;
             pressed_axes.insert(gamepad_input.clone(), PressedMapping::Key(*kc));
             if verbosity >= Verbosity::Verbose {
-                println!("{:?} axis activated => key {:?}", gamepad_input, kc);
+                println!("Activated {:?} ({:?})", gamepad_input, kc);
             }
         }
     }
@@ -153,9 +169,10 @@ fn handle_mapping_activation(
 /// This corresponds to sending a KEY UP event and releasing any SHIFT/ALTGR if it was pressed.
 fn handle_mapping_release(
     gamepad_input: &GamepadInput,
+    mapping_value: &Mapping,
     vk: &mut VirtualDevice,
-    verbosity: Verbosity,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
+    verbosity: Verbosity,
 ) -> io::Result<()> {
     if let Some(pressed) = pressed_axes.remove(gamepad_input) {
         match pressed {
@@ -163,21 +180,21 @@ fn handle_mapping_release(
                 let evt = InputEvent::new(EventType::KEY, keycode.code(), 0);
                 vk.emit(&[evt])?;
                 release_kernel_modifier(level, vk)?;
-
-                if verbosity >= Verbosity::Verbose {
-                    println!(
-                        "{:?} axis deactivated => keycode={:?}, lvl={}",
-                        gamepad_input, keycode, level
-                    );
-                }
             }
             PressedMapping::Key(kc) => {
                 let evt = InputEvent::new(EventType::KEY, kc.code(), 0);
                 vk.emit(&[evt])?;
-                if verbosity >= Verbosity::Verbose {
-                    println!("{:?} axis deactivated => key {:?}", gamepad_input, kc);
-                }
             }
+        }
+        if verbosity >= Verbosity::Verbose {
+            match mapping_value {
+                Mapping::Character(mapping_value) => {
+                    println!("Deactivated {:?} ({})", gamepad_input, mapping_value)
+                }
+                Mapping::Key(mapping_value) => {
+                    println!("Deactivated {:?} ({:?})", gamepad_input, mapping_value)
+                }
+            };
         }
     }
     Ok(())
@@ -462,6 +479,7 @@ fn get_mappings(
 /// - `config`: The controller configuration (either parsed or ephemeral).
 /// - `auto_mapping_enabled`: Flag indicating whether to enable automatic mapping.
 /// - `verbosity`: The verbosity level for logging.
+/// - `friendly`: Flag indicating whether to use friendly names in logs.
 ///
 /// # Returns
 /// - `io::Result<()>`: Returns `Ok(())` on success or an `io::Error` on failure.
@@ -470,6 +488,7 @@ fn handle_device(
     config: &ControllerConfig,
     auto_mapping_enabled: bool,
     verbosity: Verbosity,
+    friendly: bool,
 ) -> io::Result<()> {
     // Open the device
     let mut gamepad_device = Device::open(device_path)?;
@@ -533,6 +552,14 @@ fn handle_device(
     let mut pressed_inputs: HashMap<GamepadInput, bool> = HashMap::new();
     let mut pressed_axes: HashMap<GamepadInput, PressedMapping> = HashMap::new();
     let mut modifiers = config.modifiers.clone();
+    let alt_name = match modifiers.alternate_modifier.clone() {
+        Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
+        None => "ALT".to_string(),
+    };
+    let shift_name = match modifiers.shift_modifier.clone() {
+        Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
+        None => "SHIFT".to_string(),
+    };
 
     if verbosity >= Verbosity::Verbose {
         println!("Listening for gamepad events...");
@@ -546,14 +573,47 @@ fn handle_device(
                     let gamepad_input = GamepadInput::Button(k);
 
                     // Handle modifiers
-                    if Some(gamepad_input.clone()) == modifiers.shift_modifier {
+                    if Some(gamepad_input.clone()) == config.modifiers.shift_modifier {
                         modifiers.shift_active = ev.value() == 1;
+                        if verbosity >= Verbosity::Verbose && friendly {
+                            let friendly_name = config
+                                .friendly_names
+                                .get(&gamepad_input)
+                                .unwrap_or(&"SHIFT".to_string())
+                                .clone();
+                            println!(
+                                "{} {} (SHIFT)",
+                                if modifiers.shift_active {
+                                    "Pressed"
+                                } else {
+                                    "Released"
+                                },
+                                friendly_name
+                            );
+                        }
                         continue;
                     }
-                    if Some(gamepad_input.clone()) == modifiers.alternate_modifier {
+                    if Some(gamepad_input.clone()) == config.modifiers.alternate_modifier {
                         modifiers.alternate_active = ev.value() == 1;
+                        if verbosity >= Verbosity::Verbose && friendly {
+                            let friendly_name = config
+                                .friendly_names
+                                .get(&gamepad_input)
+                                .unwrap_or(&"ALTERNATE".to_string())
+                                .clone();
+                            println!(
+                                "{} {} (ALTERNATE)",
+                                if modifiers.alternate_active {
+                                    "Pressed"
+                                } else {
+                                    "Released"
+                                },
+                                friendly_name
+                            );
+                        }
                         continue;
                     }
+
                     // Handle special enter
                     if Some(gamepad_input.clone()) == special_enter_input {
                         let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
@@ -566,6 +626,12 @@ fn handle_device(
                         let val = ev.value();
                         let e = InputEvent::new(EventType::KEY, key_to_emit.code(), val);
                         virtual_keyboard.emit(&[e])?;
+                        if verbosity >= Verbosity::Verbose {
+                            let action = if val == 1 { "Activated" } else { "Deactivated" };
+                            let key_str =
+                                get_display_name(&gamepad_input, &config.friendly_names, friendly);
+                            println!("{} {} ({:?})", action, key_str, key_to_emit);
+                        }
                         continue;
                     }
 
@@ -585,33 +651,54 @@ fn handle_device(
                                     }
                                     if let Some(&(keycode, lvl)) = chrmap.get(&ch) {
                                         press_kernel_modifier(lvl, &mut virtual_keyboard)?;
-                                        let e = InputEvent::new(
-                                            EventType::KEY,
-                                            keycode.code(),
-                                            1,
-                                        );
+                                        let e = InputEvent::new(EventType::KEY, keycode.code(), 1);
                                         virtual_keyboard.emit(&[e])?;
                                         pressed_inputs.insert(
                                             gamepad_input.clone(),
                                             modifiers.alternate_active,
                                         );
-                                        if verbosity >= Verbosity::Verbose {
-                                            println!(
-                                                "Pressed: '{}' -> keycode={:?}, lvl={}",
-                                                ch, keycode, lvl
+                                        if friendly == true {
+                                            let display_name = get_display_name(
+                                                &gamepad_input,
+                                                &config.friendly_names,
+                                                friendly,
                                             );
+                                            let mut log_str = display_name.clone();
+                                            if modifiers.shift_active {
+                                                log_str = format!("{} + {}", shift_name, log_str);
+                                            }
+                                            if modifiers.alternate_active {
+                                                log_str = format!("{} + {}", alt_name, log_str);
+                                            }
+                                            println!("{}", log_str);
                                         }
+                                    }
+                                    if verbosity >= Verbosity::Verbose {
+                                        println!("Activated {:?} ({})", gamepad_input, ch);
                                     }
                                 }
                                 Mapping::Key(kc) => {
                                     let e = InputEvent::new(EventType::KEY, kc.code(), 1);
                                     virtual_keyboard.emit(&[e])?;
-                                    pressed_inputs.insert(
-                                        gamepad_input.clone(),
-                                        modifiers.alternate_active,
-                                    );
+                                    pressed_inputs
+                                        .insert(gamepad_input.clone(), modifiers.alternate_active);
+                                    if friendly == true {
+                                        let display_name = get_display_name(
+                                            &gamepad_input,
+                                            &config.friendly_names,
+                                            friendly,
+                                        );
+                                        let mut log_str = display_name.clone();
+                                        if modifiers.shift_active {
+                                            log_str = format!("{} + {}", shift_name, log_str);
+                                        }
+                                        if modifiers.alternate_active {
+                                            log_str = format!("{} + {}", alt_name, log_str);
+                                        }
+                                        println!("{}", log_str);
+                                    }
                                     if verbosity >= Verbosity::Verbose {
-                                        println!("Pressed key {:?}", kc);
+                                        println!("Activated {:?} ({:?})", gamepad_input, e);
                                     }
                                 }
                             }
@@ -631,26 +718,20 @@ fn handle_device(
                                             ch = shift_transform(ch);
                                         }
                                         if let Some(&(keycode, lvl)) = chrmap.get(&ch) {
-                                            let e = InputEvent::new(
-                                                EventType::KEY,
-                                                keycode.code(),
-                                                0,
-                                            );
+                                            let e =
+                                                InputEvent::new(EventType::KEY, keycode.code(), 0);
                                             virtual_keyboard.emit(&[e])?;
-                                            release_kernel_modifier(
-                                                lvl,
-                                                &mut virtual_keyboard,
-                                            )?;
-                                            if verbosity >= Verbosity::Verbose {
-                                                println!("Released '{}'", ch);
-                                            }
+                                            release_kernel_modifier(lvl, &mut virtual_keyboard)?;
+                                        }
+                                        if verbosity >= Verbosity::Verbose {
+                                            println!("Deactivated {:?} ({})", gamepad_input, ch);
                                         }
                                     }
                                     Mapping::Key(kc) => {
                                         let e = InputEvent::new(EventType::KEY, kc.code(), 0);
                                         virtual_keyboard.emit(&[e])?;
                                         if verbosity >= Verbosity::Verbose {
-                                            println!("Released key {:?}", kc);
+                                            println!("Deactivated {:?} ({:?})", gamepad_input, e);
                                         }
                                     }
                                 }
@@ -674,10 +755,7 @@ fn handle_device(
                             };
 
                             // Negative direction
-                            if abs_i.minimum < 0
-                                && axis_value <= rel_thr
-                                && old_val > rel_thr
-                            {
+                            if abs_i.minimum < 0 && axis_value <= rel_thr && old_val > rel_thr {
                                 let neg_input = GamepadInput::Axis(ax.0, Direction::Negative);
                                 if let Some(mval) = current_mapping.get(&neg_input) {
                                     handle_mapping_activation(
@@ -685,10 +763,26 @@ fn handle_device(
                                         mval,
                                         &chrmap,
                                         &mut virtual_keyboard,
-                                        verbosity,
                                         &mut pressed_axes,
                                         &modifiers,
+                                        verbosity,
                                     )?;
+
+                                    if friendly == true {
+                                        let display_name = get_display_name(
+                                            &neg_input,
+                                            &config.friendly_names,
+                                            friendly,
+                                        );
+                                        let mut log_str = display_name.clone();
+                                        if modifiers.shift_active {
+                                            log_str = format!("{} + {}", shift_name, log_str);
+                                        }
+                                        if modifiers.alternate_active {
+                                            log_str = format!("{} + {}", alt_name, log_str);
+                                        }
+                                        println!("{}", log_str);
+                                    }
                                 }
                             }
                             // Positive direction
@@ -703,29 +797,49 @@ fn handle_device(
                                         mval,
                                         &chrmap,
                                         &mut virtual_keyboard,
-                                        verbosity,
                                         &mut pressed_axes,
                                         &modifiers,
+                                        verbosity,
                                     )?;
+                                    if friendly == true {
+                                        let display_name = get_display_name(
+                                            &pos_input,
+                                            &config.friendly_names,
+                                            friendly,
+                                        );
+                                        let mut log_str = display_name.clone();
+                                        if modifiers.shift_active {
+                                            log_str = format!("{} + {}", shift_name, log_str);
+                                        }
+                                        if modifiers.alternate_active {
+                                            log_str = format!("{} + {}", alt_name, log_str);
+                                        }
+                                        println!("{}", log_str);
+                                    }
                                 }
                             }
                             // Release
-                            else if axis_value.abs() < act_thr && old_val.abs() >= act_thr
-                            {
+                            else if axis_value.abs() < act_thr && old_val.abs() >= act_thr {
                                 let neg_input = GamepadInput::Axis(ax.0, Direction::Negative);
-                                handle_mapping_release(
-                                    &neg_input,
-                                    &mut virtual_keyboard,
-                                    verbosity,
-                                    &mut pressed_axes,
-                                )?;
+                                if let Some(mval) = current_mapping.get(&neg_input) {
+                                    handle_mapping_release(
+                                        &neg_input,
+                                        mval,
+                                        &mut virtual_keyboard,
+                                        &mut pressed_axes,
+                                        verbosity,
+                                    )?;
+                                }
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
-                                handle_mapping_release(
-                                    &pos_input,
-                                    &mut virtual_keyboard,
-                                    verbosity,
-                                    &mut pressed_axes,
-                                )?;
+                                if let Some(mval) = current_mapping.get(&pos_input) {
+                                    handle_mapping_release(
+                                        &pos_input,
+                                        mval,
+                                        &mut virtual_keyboard,
+                                        &mut pressed_axes,
+                                        verbosity,
+                                    )?;
+                                }
                             }
                         }
                     }
@@ -783,6 +897,7 @@ pub fn run_main_loop(args: &crate::cli::Args, verbosity: Verbosity) -> std::io::
                 alternate_manual_mappings: vec![],
                 alternate_axis_mappings: vec![],
                 modifiers: Modifiers::default(),
+                friendly_names: HashMap::new(), // No friendly names for unknown devices
             };
 
             // Handle the device with automatic mapping enabled
@@ -791,6 +906,7 @@ pub fn run_main_loop(args: &crate::cli::Args, verbosity: Verbosity) -> std::io::
                 &ephemeral_cfg,
                 /* auto_mapping_enabled = */ true,
                 verbosity,
+                args.friendly,
             )
         }
 
@@ -820,6 +936,7 @@ pub fn run_main_loop(args: &crate::cli::Args, verbosity: Verbosity) -> std::io::
                 &parsed_cfg,
                 auto_mapping_enabled,
                 verbosity,
+                args.friendly,
             )
         }
     }

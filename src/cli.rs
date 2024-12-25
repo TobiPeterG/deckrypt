@@ -35,6 +35,14 @@ pub struct Args {
 
     /// Enables automatic mapping for unassigned inputs in known devices.
     /// If this is not set, unassigned inputs remain unmapped unless -u is used.
-    #[arg(short = 'm', long = "mapping", help = "Automatically map unassigned gamepad inputs")]
+    #[arg(
+        short = 'm',
+        long = "mapping",
+        help = "Automatically map unassigned gamepad inputs"
+    )]
     pub mapping: bool,
+
+    /// Enable friendly logging output
+    #[arg(short = 'f', long = "friendly")]
+    pub friendly: bool,
 }

@@ -1,17 +1,14 @@
-use crate::types::ControllerConfig;
-use std::collections::HashSet;
-use std::fs::File;
+use std::{collections::HashMap, fs::File};
 use std::io::Read;
+use std::collections::HashSet;
+use crate::types::ControllerConfig;
 
-use evdev::{AbsoluteAxisType, Key};
 use toml::Value as TomlValue;
+use evdev::{Key, AbsoluteAxisType};
 
-use crate::types::{Direction, GamepadInput, Mapping, Modifiers, Verbosity};
+use crate::types::{GamepadInput, Mapping, Direction, Modifiers, Verbosity};
 
-/// Parses a `Mapping` (character or special key) from a TOML value.  
-/// If the value is a single character string, that is the `Mapping::Character`.
-/// If the value is a known special key name, returns `Mapping::Key`.
-/// Otherwise returns `None`.
+/// Parse a `Mapping` from a TOML value.
 pub fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
     if let Some(s) = value.as_str() {
         // single character or known special key
@@ -24,8 +21,7 @@ pub fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
     None
 }
 
-/// Converts a string like "ENTER" to `Key::KEY_ENTER`, etc.  
-/// Returns `None` if the name is not recognized.
+/// Convert a string like "ENTER" -> Key::KEY_ENTER, etc.
 pub fn key_name_to_key(name: &str) -> Option<Key> {
     match name {
         "ENTER" => Some(Key::KEY_ENTER),
@@ -47,7 +43,6 @@ pub fn key_name_to_key(name: &str) -> Option<Key> {
     }
 }
 
-/// Converts a string like "ABS_X" to the corresponding `AbsoluteAxisType`, if recognized.
 pub fn axis_name_to_absolute_axis_type(name: &str) -> Option<AbsoluteAxisType> {
     match name {
         "ABS_X" => Some(AbsoluteAxisType::ABS_X),
@@ -66,9 +61,7 @@ pub fn axis_name_to_absolute_axis_type(name: &str) -> Option<AbsoluteAxisType> {
     }
 }
 
-/// Parses a string like `"ABS_X_NEG"` or `"ABS_X_POS"` into a `GamepadInput::Axis`,  
-/// or returns a `GamepadInput::Button` if the string matches a known key.  
-/// Returns `None` if it fails to interpret the string.
+/// Helper to parse gamepad input from string (e.g. "ABS_X_NEG" -> Axis(..., Negative))
 pub fn parse_gamepad_input(input_str: &str) -> Option<GamepadInput> {
     if let Some(key_code) = key_name_to_key(input_str) {
         Some(GamepadInput::Button(key_code))
@@ -94,20 +87,12 @@ pub fn parse_gamepad_input(input_str: &str) -> Option<GamepadInput> {
     }
 }
 
-/// Attempts to parse a `ControllerConfig` for the given `vendor_id`/`product_id` pair.
-///  
-/// We look for config files in fixed paths (`/usr/share/deckrypt/` and `/etc/deckrypt/`)  
-/// named `VENDORID_PRODUCTID.toml`. If a valid file is found, it is parsed via `toml::Value`.
-///  
-/// The parsed config populates:
-/// - required buttons/axes,
-/// - manual and axis mappings (normal + alternate),
-/// - optional modifiers.
 pub fn parse_controller_config(
     vendor_id: u16,
     product_id: u16,
     verbosity: Verbosity,
 ) -> Option<ControllerConfig> {
+
     let config_paths = vec![
         format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
         format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
@@ -127,6 +112,7 @@ pub fn parse_controller_config(
                         alternate_manual_mappings: vec![],
                         alternate_axis_mappings: vec![],
                         modifiers: Modifiers::default(),
+                        friendly_names: HashMap::new(),
                     };
 
                     // parse "buttons"
@@ -155,6 +141,7 @@ pub fn parse_controller_config(
                         for (axis_name, value) in axes {
                             if let Some(axis_values) = value.as_table() {
                                 // We might have e.g. axes.ABS_X.negative, axes.ABS_X.positive
+                                // so parse "negative" => parse_gamepad_input("ABS_X_NEG") etc.
                                 if let Some(neg_value) = axis_values.get("negative") {
                                     let neg_input_str = format!("{}_NEG", axis_name);
                                     if let Some(gi) = parse_gamepad_input(&neg_input_str) {
@@ -188,10 +175,9 @@ pub fn parse_controller_config(
                                     }
                                 }
                             } else {
-                                // If it's not an object with "negative"/"positive",
+                                // If it's not an object with "negative"/"positive", 
                                 // maybe it’s a direct axis name
-                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
-                                {
+                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
                                     ctrl_cfg.required_axes.insert(axis_type.0);
                                 }
                             }
@@ -199,9 +185,7 @@ pub fn parse_controller_config(
                     }
 
                     // parse "alternate_buttons"
-                    if let Some(buttons) =
-                        toml_val.get("alternate_buttons").and_then(|v| v.as_table())
-                    {
+                    if let Some(buttons) = toml_val.get("alternate_buttons").and_then(|v| v.as_table()) {
                         for (key_name, value) in buttons {
                             if let Some(g_input) = parse_gamepad_input(key_name) {
                                 match g_input {
@@ -256,8 +240,7 @@ pub fn parse_controller_config(
                                     }
                                 }
                             } else {
-                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
-                                {
+                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
                                     ctrl_cfg.required_axes.insert(axis_type.0);
                                 }
                             }
@@ -280,9 +263,7 @@ pub fn parse_controller_config(
                                 ctrl_cfg.modifiers.shift_modifier = Some(mod_input);
                             }
                         }
-                        if let Some(alternate_key) =
-                            mods.get("alternate_key").and_then(|v| v.as_str())
-                        {
+                        if let Some(alternate_key) = mods.get("alternate_key").and_then(|v| v.as_str()) {
                             if let Some(mod_input) = parse_gamepad_input(alternate_key) {
                                 match mod_input {
                                     GamepadInput::Button(k) => {
@@ -293,6 +274,18 @@ pub fn parse_controller_config(
                                     }
                                 }
                                 ctrl_cfg.modifiers.alternate_modifier = Some(mod_input);
+                            }
+                        }
+                    }
+
+                    if let Some(friendly_names) =
+                        toml_val.get("friendly_names").and_then(|v| v.as_table())
+                    {
+                        for (key_name, value) in friendly_names {
+                            if let Some(name_str) = value.as_str() {
+                                if let Some(g_input) = parse_gamepad_input(key_name) {
+                                    ctrl_cfg.friendly_names.insert(g_input.clone(), name_str.to_string());
+                                }
                             }
                         }
                     }

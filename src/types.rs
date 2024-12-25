@@ -107,6 +107,7 @@ pub struct ControllerConfig {
     pub alternate_manual_mappings: Vec<(GamepadInput, Mapping)>,
     pub alternate_axis_mappings: Vec<(GamepadInput, Mapping)>,
     pub modifiers: Modifiers,
+    pub friendly_names: HashMap<GamepadInput, String>,
 }
 
 /// A fully built set of normal & alternate mappings, along with a special Enter input if one is discovered.  

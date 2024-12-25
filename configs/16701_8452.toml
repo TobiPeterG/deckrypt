@@ -22,3 +22,15 @@ ABS_Y = { negative = 'k', positive = 'l' }
 [modifiers]
 shift_key = "BTN_TL"
 alternate_key = "BTN_TR"
+
+[friendly_names]
+BTN_SOUTH = "A"
+BTN_NORTH = "X"
+BTN_WEST = "Y"
+BTN_EAST = "B"
+BTN_TL = "LT"
+BTN_TR = "RT"
+ABS_X_NEG = "LS_L"
+ABS_X_POS = "LS_R"
+ABS_Y_NEG = "LS_U"
+ABS_Y_POS = "LS_D
