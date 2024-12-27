@@ -40,4 +40,8 @@ pub struct Args {
     /// Enable friendly logging output
     #[arg(short = 'f', long = "friendly")]
     pub friendly: bool,
+
+    /// Test if a supported device is connected
+    #[arg(short = 't', long = "test")]
+    pub test: bool,
 }

@@ -1,6 +1,6 @@
 use evdev::Device;
 use log::{debug, error};
-use std::fs;
+use std::{fs, io};
 use std::os::unix::fs::FileTypeExt;
 
 use crate::cli::Args;
@@ -65,6 +65,31 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
     }
 
     (known, unknown)
+}
+
+/// Checks if a supported device is connected based on the provided arguments.
+/// 
+/// A device is considered supported if:
+/// - It has a corresponding config file (known device), or
+/// - It's an unknown device and the `unknown` flag is set.
+///
+/// # Parameters
+/// - `args`: Parsed command-line arguments.
+///
+/// # Returns
+/// - `Ok(true)`: If a supported device is found.
+/// - `Ok(false)`: If no supported devices are found.
+/// - `Err(e)`: If an error occurs during the check.
+pub fn is_supported_device_connected(args: &Args) -> io::Result<bool> {
+    let (known_devices, unknown_devices) = scan_devices_for_config();
+
+    if args.unknown {
+        // Supported devices include known and unknown
+        return Ok(!known_devices.is_empty() || !unknown_devices.is_empty());
+    } else {
+        // Supported devices include only known
+        return Ok(!known_devices.is_empty());
+    }
 }
 
 /// Attempts to select a single device based on user arguments and the discovered devices.

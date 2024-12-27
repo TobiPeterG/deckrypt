@@ -20,6 +20,24 @@ fn main() -> io::Result<()> {
     // Initialize the logger with the appropriate level
     initialize_logger(args.verbosity);
 
+    if args.test {
+        // Perform the device test
+        match crate::device::is_supported_device_connected(&args) {
+            Ok(true) => {
+                info!("Supported device is connected.");
+                std::process::exit(0);
+            }
+            Ok(false) => {
+                error!("No supported device is connected.");
+                std::process::exit(1);
+            }
+            Err(e) => {
+                error!("Error during device test: {}", e);
+                std::process::exit(2);
+            }
+        }
+    }
+
     if args.continuously_search {
         loop {
             match input::run_main_loop(&args) {
