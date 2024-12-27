@@ -1,10 +1,12 @@
 use evdev::Device;
-use log::{debug, error};
-use std::{fs, io};
+use log::{debug, error, warn};
+use std::collections::HashMap;
 use std::os::unix::fs::FileTypeExt;
+use std::{fs, io};
 
 use crate::cli::Args;
-use crate::types::{KnownDeviceUnparsed, SelectedDevice, UnknownDevice};
+use crate::config::parse_controller_config;
+use crate::types::{ControllerConfig, KnownDeviceUnparsed, SelectedDevice, UnknownDevice};
 
 /// Scans `/dev/input` for devices and checks if each device has a corresponding Deckrypt config file.
 ///  
@@ -68,7 +70,7 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
 }
 
 /// Checks if a supported device is connected based on the provided arguments.
-/// 
+///
 /// A device is considered supported if:
 /// - It has a corresponding config file (known device), or
 /// - It's an unknown device and the `unknown` flag is set.
@@ -92,14 +94,32 @@ pub fn is_supported_device_connected(args: &Args) -> io::Result<bool> {
     }
 }
 
+/// Checks if a device supports all required buttons as per its ControllerConfig.
+///
+/// # Arguments
+///
+/// * `device` - The evdev::Device to check.
+/// * `config` - The ControllerConfig containing required_buttons.
+///
+/// # Returns
+///
+/// * `true` if the device supports all required buttons.
+/// * `false` otherwise.
+fn device_supports_config(device: &Device, config: &ControllerConfig) -> bool {
+    if let Some(supported_keys) = device.supported_keys() {
+        config
+            .required_buttons
+            .iter()
+            .all(|k| supported_keys.contains(*k))
+    } else {
+        false
+    }
+}
+
 /// Attempts to select a single device based on user arguments and the discovered devices.
-///  
-/// 1) If `args.unknown` is specified, we list unknown devices and let the user pick one.  
-/// 2) Otherwise, we look at known devices.  
-///   - If there is only one known device, select it.  
-///   - If `args.auto_select` is set, automatically pick the first known device.  
-///   - Otherwise, prompt the user to select from multiple known devices.  
-///  
+///
+/// Enhanced to handle multiple devices per config file by validating device capabilities.
+///
 /// Returns `Some(SelectedDevice::Known(...))` or `Some(SelectedDevice::Unknown(...))` on success,
 /// or `None` if no device could be selected.
 pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
@@ -107,13 +127,13 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
 
     let (known_devices, unknown_devices) = scan_devices_for_config();
 
-    // if user wants unknown
+    // Handle unknown devices if the user specified the -u flag
     if args.unknown {
         if unknown_devices.is_empty() {
             error!("No unknown devices found!");
             return None;
         } else {
-            // List them and pick
+            // List unknown devices and allow the user to select one
             println!("Found the following unknown devices:");
             for (i, dev) in unknown_devices.iter().enumerate() {
                 println!(
@@ -136,37 +156,98 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
                         "Selected unknown device: {} (VID {:04x}, PID {:04x})",
                         chosen.path, chosen.vendor_id, chosen.product_id
                     );
-                    Some(SelectedDevice::Unknown(chosen))
+                    return Some(SelectedDevice::Unknown(chosen));
                 }
                 _ => {
                     error!("Invalid selection.");
-                    None
+                    return None;
                 }
             }
         }
-    } else {
-        // known devices
-        if known_devices.is_empty() {
-            return None;
-        } else if known_devices.len() == 1 {
-            let dev = known_devices[0].clone();
-            debug!(
-                "Found device with config: {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                dev.path, dev.vendor_id, dev.product_id
-            );
-            Some(SelectedDevice::Known(dev))
-        } else {
-            // multiple => either auto_select or prompt
-            if args.auto_select {
-                let dev = known_devices[0].clone();
-                debug!(
-                    "Automatically selected device: {} (Vendor ID: {:04x}, Product ID: {:04x})",
-                    dev.name, dev.vendor_id, dev.product_id
+    }
+
+    // Group known devices by their config file path
+    let mut config_to_devices: HashMap<String, Vec<KnownDeviceUnparsed>> = HashMap::new();
+    for device in known_devices {
+        config_to_devices
+            .entry(device.config_file_path.clone())
+            .or_default()
+            .push(device);
+    }
+
+    for (config_path, devices) in config_to_devices.iter() {
+        // Load the configuration
+        let config = match parse_controller_config(
+            devices[0].vendor_id,
+            devices[0].product_id,
+            config_path.clone(),
+        ) {
+            Some(cfg) => cfg,
+            None => {
+                error!(
+                    "Failed to parse config file '{}'. Skipping devices with this config.",
+                    config_path
                 );
-                Some(SelectedDevice::Known(dev))
+                continue;
+            }
+        };
+
+        // Validate each device in the group
+        let mut valid_devices = Vec::new();
+        for device in devices {
+            // Open the device
+            let device_path = &device.path;
+            match Device::open(device_path) {
+                Ok(dev) => {
+                    if device_supports_config(&dev, &config) {
+                        valid_devices.push(device.clone());
+                    } else {
+                        warn!(
+                            "Device '{}' (VID {:04x}, PID {:04x}) does not support all required buttons and will be excluded.",
+                            device.name, device.vendor_id, device.product_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to open device '{}': {}. It will be excluded from selection.",
+                        device.path, e
+                    );
+                }
+            }
+        }
+
+        if valid_devices.is_empty() {
+            warn!(
+                "No devices found supporting all required buttons for config '{}'.",
+                config_path
+            );
+            continue;
+        }
+
+        // Selection logic based on the number of valid devices
+        if valid_devices.len() == 1 {
+            let device = valid_devices[0].clone();
+            debug!(
+                "Selected device '{}' (VID {:04x}, PID {:04x}) as the only valid device for config '{}'.",
+                device.name, device.vendor_id, device.product_id, config_path
+            );
+            return Some(SelectedDevice::Known(device));
+        } else {
+            if args.auto_select {
+                let device = valid_devices[0].clone();
+                debug!(
+                    "Automatically selected device '{}' (VID {:04x}, PID {:04x}) for config '{}'.",
+                    device.name, device.vendor_id, device.product_id, config_path
+                );
+                return Some(SelectedDevice::Known(device));
             } else {
-                println!("Multiple known devices with config files found:");
-                for (i, dev) in known_devices.iter().enumerate() {
+                // Prompt the user to select among valid devices
+                println!(
+                    "Multiple devices match config '{}'. Please select one:",
+                    config_path
+                );
+                for (i, dev) in valid_devices.iter().enumerate() {
                     println!(
                         "{}: {} - {} (Vendor ID: {:04x}, Product ID: {:04x})",
                         i, dev.path, dev.name, dev.vendor_id, dev.product_id
@@ -181,16 +262,22 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
                 }
                 let selection = input.trim().parse::<usize>();
                 match selection {
-                    Ok(num) if num < known_devices.len() => {
-                        let chosen_dev = known_devices[num].clone();
-                        Some(SelectedDevice::Known(chosen_dev))
+                    Ok(num) if num < valid_devices.len() => {
+                        let chosen = valid_devices[num].clone();
+                        debug!(
+                            "Selected device '{}' (VID {:04x}, PID {:04x}) for config '{}'.",
+                            chosen.name, chosen.vendor_id, chosen.product_id, config_path
+                        );
+                        return Some(SelectedDevice::Known(chosen));
                     }
                     _ => {
                         error!("Invalid selection.");
-                        None
+                        return None;
                     }
                 }
             }
         }
     }
+    error!("No supported devices found after validation.");
+    None
 }
