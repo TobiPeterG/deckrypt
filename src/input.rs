@@ -1,3 +1,4 @@
+use evdev::AbsoluteAxisType;
 use libc::input_absinfo;
 use log::{debug, error, trace};
 use std::collections::{HashMap, HashSet};
@@ -93,12 +94,18 @@ fn get_display_name(
 ) -> String {
     if friendly {
         if let Some(name) = friendly_names.get(gamepad_input) {
-            name.clone()
-        } else {
-            format!("{:?}", gamepad_input)
+            return name.clone()
         }
-    } else {
-        format!("{:?}", gamepad_input)
+    }
+    match gamepad_input {
+        GamepadInput::Button(button) => format!("{:?}", button),
+        GamepadInput::Axis(num, direction) => {
+            let dir = match direction {
+                Direction::Negative => "NEG",
+                Direction::Positive => "POS"
+            };
+            format!("{:?}_{}", AbsoluteAxisType(*num), dir)
+        }
     }
 }
 
@@ -111,6 +118,7 @@ fn handle_mapping_activation(
     virtual_keyboard: &mut VirtualDevice,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
     modifiers: &Modifiers,
+    display_name: &String,
 ) -> std::io::Result<()> {
     match mapping_value {
         Mapping::Character(mut ch) => {
@@ -130,13 +138,13 @@ fn handle_mapping_activation(
                     },
                 );
             }
-            debug!("Activated {:?} ({})", gamepad_input, ch);
+            debug!("Activated {:?} ({})", display_name, ch);
         }
         Mapping::Key(kc) => {
             let e = InputEvent::new(EventType::KEY, kc.code(), 1);
             virtual_keyboard.emit(&[e])?;
             pressed_axes.insert(gamepad_input.clone(), PressedMapping::Key(*kc));
-            debug!("Activated {:?} ({:?})", gamepad_input, kc);
+            debug!("Activated {:?} ({:?})", display_name, kc);
         }
     }
     Ok(())
@@ -149,9 +157,12 @@ fn handle_mapping_release(
     mapping_value: &Mapping,
     vk: &mut VirtualDevice,
     pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
+    config: &ControllerConfig,
     modifiers: &Modifiers,
+    friendly: bool,
 ) -> io::Result<()> {
     let shift_active = modifiers.shift_active == true;
+    let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
     if let Some(pressed) = pressed_axes.remove(gamepad_input) {
         match pressed {
             PressedMapping::Character { keycode, level } => {
@@ -169,10 +180,10 @@ fn handle_mapping_release(
                 if shift_active {
                     mapping_value = shift_transform(mapping_value);
                 }
-                debug!("Deactivated {:?} ({})", gamepad_input, mapping_value)
+                debug!("Deactivated {:?} ({})", display_name, mapping_value)
             }
             Mapping::Key(mapping_value) => {
-                debug!("Deactivated {:?} ({:?})", gamepad_input, mapping_value)
+                debug!("Deactivated {:?} ({:?})", display_name, mapping_value)
             }
         };
     }
@@ -191,6 +202,7 @@ fn get_mappings(
     device: &Device,
     config: &ControllerConfig,
     abs_info_map: Option<&HashMap<u16, input_absinfo>>,
+    friendly: bool,
 
     // Controls whether we auto-map leftover inputs:
     auto_mapping_enabled: bool,
@@ -298,7 +310,8 @@ fn get_mappings(
             if let Some(next_char) = normal_chars_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
-                trace!("Automatically mapped {:?} -> '{}'", gi, next_char);
+                let display_name = get_display_name(&gi, &config.friendly_names, friendly);
+                trace!("Automatically mapped {:?} -> '{}'", display_name, next_char);
             } else {
                 break;
             }
@@ -320,7 +333,8 @@ fn get_mappings(
             if let Some(next_char) = numbers_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
-                trace!("Automatically mapped {:?} -> '{}'", gi, next_char);
+                let display_name = get_display_name(&gi, &config.friendly_names, friendly);
+                trace!("Automatically mapped {:?} -> '{}'", display_name, next_char);
             } else {
                 break;
             }
@@ -347,7 +361,8 @@ fn get_mappings(
             if let Some(next_char) = symbols_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
-                trace!("Automatically mapped {:?} -> '{}'", gi, next_char);
+                let display_name = get_display_name(&gi, &config.friendly_names, friendly);
+                trace!("Automatically mapped {:?} -> '{}'", display_name, next_char);
             } else {
                 break;
             }
@@ -390,7 +405,8 @@ fn get_mappings(
                 if let Some(c) = alternate_chars_iter.next() {
                     alternate_mapping.insert(gi.clone(), Mapping::Character(c));
                     used_chars.insert(c);
-                    trace!("Alternate mapped {:?} -> '{}'", gi, c);
+                    let display_name = get_display_name(&gi, &config.friendly_names, friendly);
+                    trace!("Alternate mapped {:?} -> '{}'", display_name, c);
                 }
             }
         }
@@ -461,8 +477,8 @@ fn handle_key_activation(
     let e = InputEvent::new(EventType::KEY, keycode.code(), 1);
     virtual_keyboard.emit(&[e])?;
     pressed_inputs.insert(gamepad_input.clone(), modifiers.alternate_active);
+    let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
     if friendly == true {
-        let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
         let mut log_str = display_name.clone();
         if modifiers.shift_active {
             log_str = format!("{} + {}", shift_name, log_str);
@@ -473,8 +489,8 @@ fn handle_key_activation(
         println!("{}", log_str);
     }
     match output {
-        Some(ch) => debug!("Activated {:?} ({})", gamepad_input, ch),
-        None => debug!("Activated {:?} ({:?})", gamepad_input, e),
+        Some(ch) => debug!("Activated {:?} ({})", display_name, ch),
+        None => debug!("Activated {:?} ({:?})", display_name, e),
     }
     Ok(())
 }
@@ -491,6 +507,7 @@ fn handle_axis_activation(
     shift_name: &str,
     alt_name: &str,
 ) -> io::Result<()> {
+    let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
     if let Some(mval) = current_mapping.get(&gamepad_input) {
         handle_mapping_activation(
             &gamepad_input,
@@ -499,10 +516,10 @@ fn handle_axis_activation(
             &mut virtual_keyboard,
             &mut pressed_axes,
             &modifiers,
+            &display_name,
         )?;
 
         if friendly == true {
-            let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
             let mut log_str = display_name.clone();
             if modifiers.shift_active {
                 log_str = format!("{} + {}", shift_name, log_str);
@@ -570,6 +587,7 @@ fn handle_device(
         &gamepad_device,
         config,
         abs_info_map.as_ref(),
+        friendly,
         auto_mapping_enabled,
     );
     let normal_mapping = built.normal_mapping;
@@ -693,6 +711,7 @@ fn handle_device(
                         }
                     } else {
                         // Release
+                        let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
                         if let Some(&was_alt) = pressed_inputs.get(&gamepad_input) {
                             let mapval = if was_alt {
                                 &alternate_mapping
@@ -715,12 +734,12 @@ fn handle_device(
                                                 &mut virtual_keyboard,
                                             )?;
                                         }
-                                        debug!("Deactivated {:?} ({})", gamepad_input, ch);
+                                        debug!("Deactivated {:?} ({})", display_name, ch);
                                     }
                                     Mapping::Key(kc) => {
                                         let e = InputEvent::new(EventType::KEY, kc.code(), 0);
                                         virtual_keyboard.emit(&[e])?;
-                                        debug!("Deactivated {:?} ({:?})", gamepad_input, e);
+                                        debug!("Deactivated {:?} ({:?})", display_name, e);
                                     }
                                 }
                             }
@@ -786,7 +805,9 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
+                                        config,
                                         &modifiers,
+                                        friendly,
                                     )?;
                                 }
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
@@ -796,7 +817,9 @@ fn handle_device(
                                         mval,
                                         &mut virtual_keyboard,
                                         &mut pressed_axes,
+                                        config,
                                         &modifiers,
+                                        friendly,
                                     )?;
                                 }
                             }
