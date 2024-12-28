@@ -39,6 +39,7 @@ pub enum Mapping {
 pub struct Modifiers {
     pub shift_modifier: Option<GamepadInput>,
     pub alternate_modifier: Option<GamepadInput>,
+    pub enter_modifier: Option<GamepadInput>,
     pub alternate_active: bool,
     pub shift_active: bool,
 }
@@ -86,7 +87,6 @@ pub struct ControllerConfig {
 pub struct BuiltMappings {
     pub normal_mapping: HashMap<GamepadInput, Mapping>,
     pub alternate_mapping: HashMap<GamepadInput, Mapping>,
-    pub special_enter_input: Option<GamepadInput>,
 }
 
 /// Represents a "known" device that we've discovered has a config file, but the config hasn't been parsed yet.

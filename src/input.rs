@@ -1,13 +1,12 @@
 use evdev::AbsoluteAxisType;
-use libc::input_absinfo;
-use log::{debug, error, trace};
-use std::collections::{HashMap, HashSet};
-use std::io;
-
 use evdev::{
     uinput::{VirtualDevice, VirtualDeviceBuilder},
     Device, EventType, InputEvent, InputEventKind, Key,
 };
+use libc::input_absinfo;
+use log::{debug, error, trace, warn};
+use std::collections::{HashMap, HashSet};
+use std::io;
 
 use crate::keymap::{generate_chrmap, shift_transform, ALLOWED_CHARACTERS};
 use crate::types::{
@@ -94,7 +93,7 @@ fn get_display_name(
 ) -> String {
     if friendly {
         if let Some(name) = friendly_names.get(gamepad_input) {
-            return name.clone()
+            return name.clone();
         }
     }
     match gamepad_input {
@@ -102,92 +101,11 @@ fn get_display_name(
         GamepadInput::Axis(num, direction) => {
             let dir = match direction {
                 Direction::Negative => "NEG",
-                Direction::Positive => "POS"
+                Direction::Positive => "POS",
             };
             format!("{:?}_{}", AbsoluteAxisType(*num), dir)
         }
     }
-}
-
-/// Handles activation of a mapping (e.g., axis crossing threshold).  
-/// This could be pressing a character or a special key, taking into account SHIFT if it’s active.
-fn handle_mapping_activation(
-    gamepad_input: &GamepadInput,
-    mapping_value: &Mapping,
-    chrmap: &HashMap<char, (Key, u8)>,
-    virtual_keyboard: &mut VirtualDevice,
-    pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
-    modifiers: &Modifiers,
-    display_name: &String,
-) -> std::io::Result<()> {
-    match mapping_value {
-        Mapping::Character(mut ch) => {
-            if modifiers.shift_active {
-                ch = shift_transform(ch);
-            }
-            if let Some(&(keycode, lvl)) = chrmap.get(&ch) {
-                handle_kernel_modifier(lvl, Action::Activate, virtual_keyboard)?;
-                let e = InputEvent::new(EventType::KEY, keycode.code(), 1);
-                virtual_keyboard.emit(&[e])?;
-
-                pressed_axes.insert(
-                    gamepad_input.clone(),
-                    PressedMapping::Character {
-                        keycode,
-                        level: lvl,
-                    },
-                );
-            }
-            debug!("Activated {:?} ({})", display_name, ch);
-        }
-        Mapping::Key(kc) => {
-            let e = InputEvent::new(EventType::KEY, kc.code(), 1);
-            virtual_keyboard.emit(&[e])?;
-            pressed_axes.insert(gamepad_input.clone(), PressedMapping::Key(*kc));
-            debug!("Activated {:?} ({:?})", display_name, kc);
-        }
-    }
-    Ok(())
-}
-
-/// Handles release of a mapping (e.g., axis returning to neutral).  
-/// This corresponds to sending a KEY UP event and releasing any SHIFT/ALTGR if it was pressed.
-fn handle_mapping_release(
-    gamepad_input: &GamepadInput,
-    mapping_value: &Mapping,
-    vk: &mut VirtualDevice,
-    pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
-    config: &ControllerConfig,
-    modifiers: &Modifiers,
-    friendly: bool,
-) -> io::Result<()> {
-    let shift_active = modifiers.shift_active == true;
-    let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
-    if let Some(pressed) = pressed_axes.remove(gamepad_input) {
-        match pressed {
-            PressedMapping::Character { keycode, level } => {
-                let evt = InputEvent::new(EventType::KEY, keycode.code(), 0);
-                vk.emit(&[evt])?;
-                handle_kernel_modifier(level, Action::Deactivate, vk)?;
-            }
-            PressedMapping::Key(kc) => {
-                let evt = InputEvent::new(EventType::KEY, kc.code(), 0);
-                vk.emit(&[evt])?;
-            }
-        }
-        match mapping_value {
-            Mapping::Character(mut mapping_value) => {
-                if shift_active {
-                    mapping_value = shift_transform(mapping_value);
-                }
-                debug!("Deactivated {:?} ({})", display_name, mapping_value)
-            }
-            Mapping::Key(mapping_value) => {
-                debug!("Deactivated {:?} ({:?})", display_name, mapping_value)
-            }
-        };
-    }
-    Ok(())
 }
 
 /// Builds up a final set of normal and alternate mappings by:
@@ -224,6 +142,9 @@ fn get_mappings(
     }
     if let Some(ref mod2) = modifiers.alternate_modifier {
         modifier_inputs.insert(mod2.clone());
+    }
+    if let Some(ref mod3) = modifiers.enter_modifier {
+        modifier_inputs.insert(mod3.clone());
     }
 
     // -------------------------------
@@ -288,9 +209,9 @@ fn get_mappings(
     }
 
     // Filter out any already mapped
-    let available_gamepad_inputs: Vec<_> = all_gamepad_inputs
+    let available_normal_gamepad_inputs: Vec<_> = all_gamepad_inputs
         .iter()
-        .filter(|gi| !normal_mapping.contains_key(*gi) && !alternate_mapping.contains_key(*gi))
+        .filter(|gi| !normal_mapping.contains_key(*gi))
         .cloned()
         .collect();
 
@@ -306,7 +227,7 @@ fn get_mappings(
             .collect();
 
         let mut normal_chars_iter = normal_letters.into_iter();
-        for gi in &available_gamepad_inputs {
+        for gi in &available_normal_gamepad_inputs {
             if let Some(next_char) = normal_chars_iter.next() {
                 normal_mapping.insert(gi.clone(), Mapping::Character(next_char));
                 used_chars.insert(next_char);
@@ -318,7 +239,7 @@ fn get_mappings(
         }
 
         // 4) Then digits
-        let remaining_gamepad_inputs: Vec<_> = available_gamepad_inputs
+        let remaining_gamepad_inputs: Vec<_> = available_normal_gamepad_inputs
             .iter()
             .filter(|gi| !normal_mapping.contains_key(*gi))
             .cloned()
@@ -370,17 +291,6 @@ fn get_mappings(
     }
 
     // -------------------------------
-    // Special ENTER if found
-    // -------------------------------
-    let mut special_enter_input: Option<GamepadInput> = None;
-    for (inp, m) in &normal_mapping {
-        if let Mapping::Key(Key::KEY_ENTER) = m {
-            special_enter_input = Some(inp.clone());
-            break;
-        }
-    }
-
-    // -------------------------------
     // 6) For the alternate mapping, fill in reversed leftover
     // but only if auto_mapping_enabled
     // -------------------------------
@@ -391,6 +301,11 @@ fn get_mappings(
                 used_chars.insert(*c);
             }
         }
+        let available_alternate_gamepad_inputs: Vec<_> = all_gamepad_inputs
+            .iter()
+            .filter(|gi| !alternate_mapping.contains_key(*gi))
+            .cloned()
+            .collect();
 
         // Collect all available characters for alternate mapping in the correct order
         let mut alternate_chars_iter = ALLOWED_CHARACTERS
@@ -400,7 +315,7 @@ fn get_mappings(
             .collect::<Vec<char>>()
             .into_iter();
 
-        for gi in &available_gamepad_inputs {
+        for gi in &available_alternate_gamepad_inputs {
             if !alternate_mapping.contains_key(gi) {
                 if let Some(c) = alternate_chars_iter.next() {
                     alternate_mapping.insert(gi.clone(), Mapping::Character(c));
@@ -410,124 +325,190 @@ fn get_mappings(
                 }
             }
         }
-
-        // Ensure special_enter_input is not overridden in alternate mapping
-        if let Some(ref enter_inp) = special_enter_input {
-            if alternate_mapping.contains_key(enter_inp) {
-                error!(
-                    "Warning: The button assigned to ENTER in normal mode cannot be overridden in alternate mode."
-                );
-                alternate_mapping.remove(enter_inp);
-            }
-        }
     }
 
     BuiltMappings {
         normal_mapping,
         alternate_mapping,
-        special_enter_input,
     }
 }
 
-fn handle_modifier_state(
-    gamepad_input: &GamepadInput,
-    modifier_label: &str,
-    ev: &InputEvent,
-    friendly: bool,
-    config: &ControllerConfig,
-    modifiers: &mut Modifiers,
-) {
-    let is_active = ev.value() == 1;
-    match modifier_label {
-        "SHIFT" => modifiers.shift_active = is_active,
-        "ALTERNATE" => modifiers.alternate_active = is_active,
-        _ => {}
-    }
-    if friendly {
-        let friendly_name = config
-            .friendly_names
-            .get(gamepad_input)
-            .unwrap_or(&modifier_label.to_string())
-            .clone();
-        debug!(
-            "{} {} ({})",
-            if is_active {
-                "Activated"
-            } else {
-                "Deactivated"
-            },
-            friendly_name,
-            modifier_label
-        );
-    }
-}
-
-fn handle_key_activation(
-    gamepad_input: &GamepadInput,
-    config: &ControllerConfig,
-    modifiers: &mut Modifiers,
-    keycode: Key,
+fn press_key(
+    key_to_emit: Key,
+    pressed_mapping: PressedMapping,
     virtual_keyboard: &mut VirtualDevice,
-    pressed_inputs: &mut HashMap<GamepadInput, bool>,
-    friendly: bool,
-    shift_name: &str,
-    alt_name: &str,
-    output: Option<char>,
+    pressed_mappings: &mut HashMap<GamepadInput, PressedMapping>,
+    gamepad_input: &GamepadInput,
 ) -> io::Result<()> {
-    let e = InputEvent::new(EventType::KEY, keycode.code(), 1);
+    let e = InputEvent::new(EventType::KEY, key_to_emit.code(), 1);
     virtual_keyboard.emit(&[e])?;
-    pressed_inputs.insert(gamepad_input.clone(), modifiers.alternate_active);
+    // Track the pressed mapping
+    pressed_mappings.insert(gamepad_input.clone(), pressed_mapping);
+    Ok(())
+}
+
+/// Generalized function to handle activation of a mapping (button or axis).
+fn activate_mapping(
+    gamepad_input: &GamepadInput,
+    config: &ControllerConfig,
+    mapping: &HashMap<GamepadInput, Mapping>,
+    chrmap: &HashMap<char, (Key, u8)>,
+    virtual_keyboard: &mut VirtualDevice,
+    pressed_mappings: &mut HashMap<GamepadInput, PressedMapping>,
+    modifiers: &mut Modifiers,
+    friendly: bool,
+) -> io::Result<()> {
     let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
-    if friendly == true {
-        let mut log_str = display_name.clone();
-        if modifiers.shift_active {
-            log_str = format!("{} + {}", shift_name, log_str);
-        }
-        if modifiers.alternate_active {
-            log_str = format!("{} + {}", alt_name, log_str);
-        }
-        println!("{}", log_str);
+    if Some(gamepad_input.clone()) == modifiers.shift_modifier {
+        modifiers.shift_active = true;
+        debug!("Activated {} ({})", display_name, "SHIFT");
+        return Ok(());
     }
-    match output {
-        Some(ch) => debug!("Activated {:?} ({})", display_name, ch),
-        None => debug!("Activated {:?} ({:?})", display_name, e),
+    if Some(gamepad_input.clone()) == modifiers.alternate_modifier {
+        modifiers.alternate_active = true;
+        debug!("Activated {} ({})", display_name, "ALTERNATE");
+        return Ok(());
+    }
+    if Some(gamepad_input.clone()) == modifiers.enter_modifier {
+        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
+            Key::KEY_ESC
+        } else if modifiers.shift_active || modifiers.alternate_active {
+            Key::KEY_BACKSPACE
+        } else {
+            Key::KEY_ENTER
+        };
+        press_key(
+            key_to_emit,
+            PressedMapping::Key(key_to_emit),
+            virtual_keyboard,
+            pressed_mappings,
+            gamepad_input,
+        )?;
+        debug!("Activated {} ({:?})", display_name, key_to_emit);
+        return Ok(());
+    }
+    if let Some(mapping_value) = mapping.get(&gamepad_input) {
+        let mut log_str = display_name.clone();
+        if friendly == true {
+            if modifiers.shift_active {
+                let shift_name = match &modifiers.shift_modifier {
+                    Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
+                    None => "SHIFT".to_string(),
+                };
+                log_str = format!("{} + {}", shift_name, log_str);
+            }
+            if modifiers.alternate_active {
+                let alt_name = match &modifiers.alternate_modifier {
+                    Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
+                    None => "ALTERNATE".to_string(),
+                };
+                log_str = format!("{} + {}", alt_name, log_str);
+            }
+            println!("{}", log_str);
+        }
+
+        match mapping_value {
+            Mapping::Character(mut ch) => {
+                // Apply shift if active
+                if modifiers.shift_active {
+                    ch = shift_transform(ch);
+                }
+
+                if let Some((keycode, lvl)) = chrmap.get(&ch) {
+                    // Handle modifiers based on level
+                    handle_kernel_modifier(*lvl, Action::Activate, virtual_keyboard)?;
+                    press_key(
+                        *keycode,
+                        PressedMapping::Character {
+                            keycode: *keycode,
+                            level: *lvl,
+                        },
+                        virtual_keyboard,
+                        pressed_mappings,
+                        gamepad_input,
+                    )?;
+                    debug!("Activated {} ({})", display_name, ch);
+                } else {
+                    warn!("No keycode mapping found for character '{}'", ch);
+                }
+            }
+            Mapping::Key(kc) => {
+                press_key(
+                    *kc,
+                    PressedMapping::Key(*kc),
+                    virtual_keyboard,
+                    pressed_mappings,
+                    gamepad_input,
+                )?;
+
+                debug!("Activated {} ({:?})", display_name, kc);
+            }
+        }
     }
     Ok(())
 }
 
-fn handle_axis_activation(
-    gamepad_input: GamepadInput,
-    current_mapping: &HashMap<GamepadInput, Mapping>,
-    chrmap: &HashMap<char, (Key, u8)>,
-    mut pressed_axes: &mut HashMap<GamepadInput, PressedMapping>,
-    config: &ControllerConfig,
+/// Generalized function to handle release of a mapping (button or axis).
+fn release_mapping(
+    gamepad_input: &GamepadInput,
+    mapping: &HashMap<GamepadInput, Mapping>,
+    virtual_keyboard: &mut VirtualDevice,
+    pressed_mappings: &mut HashMap<GamepadInput, PressedMapping>,
     modifiers: &mut Modifiers,
-    mut virtual_keyboard: &mut VirtualDevice,
-    friendly: bool,
-    shift_name: &str,
-    alt_name: &str,
+    display_name: &String,
 ) -> io::Result<()> {
-    let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
-    if let Some(mval) = current_mapping.get(&gamepad_input) {
-        handle_mapping_activation(
-            &gamepad_input,
-            mval,
-            &chrmap,
-            &mut virtual_keyboard,
-            &mut pressed_axes,
-            &modifiers,
-            &display_name,
-        )?;
+    if Some(gamepad_input.clone()) == modifiers.shift_modifier {
+        modifiers.shift_active = false;
+        debug!("Deactivated {} ({})", display_name, "SHIFT");
+        return Ok(());
+    }
+    if Some(gamepad_input.clone()) == modifiers.alternate_modifier {
+        modifiers.alternate_active = false;
+        debug!("Deactivated {} ({})", display_name, "ALTERNATE");
+        return Ok(());
+    }
+    if Some(gamepad_input.clone()) == modifiers.enter_modifier {
+        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
+            Key::KEY_ESC
+        } else if modifiers.shift_active || modifiers.alternate_active {
+            Key::KEY_BACKSPACE
+        } else {
+            Key::KEY_ENTER
+        };
+        let e = InputEvent::new(EventType::KEY, key_to_emit.code(), 0);
+        virtual_keyboard.emit(&[e])?;
+        debug!("Deactivated {} ({:?})", display_name, key_to_emit);
+        return Ok(());
+    }
+    if let Some(pressed) = pressed_mappings.remove(gamepad_input) {
+        match pressed {
+            PressedMapping::Character { keycode, level } => {
+                // Emit key release
+                let e = InputEvent::new(EventType::KEY, keycode.code(), 0);
+                virtual_keyboard.emit(&[e])?;
 
-        if friendly == true {
-            let mut log_str = display_name.clone();
-            if modifiers.shift_active {
-                log_str = format!("{} + {}", shift_name, log_str);
+                // Handle modifier deactivation
+                handle_kernel_modifier(level, Action::Deactivate, virtual_keyboard)?;
             }
-            if modifiers.alternate_active {
-                log_str = format!("{} + {}", alt_name, log_str);
+            PressedMapping::Key(kc) => {
+                // Emit key release
+                let e = InputEvent::new(EventType::KEY, kc.code(), 0);
+                virtual_keyboard.emit(&[e])?;
             }
-            println!("{}", log_str);
+        }
+
+        if let Some(mapping_value) = mapping.get(&gamepad_input) {
+            match mapping_value {
+                Mapping::Character(mut ch) => {
+                    if modifiers.shift_active {
+                        ch = shift_transform(ch);
+                    }
+                    debug!("Deactivated {} ({})", display_name, ch);
+                }
+                Mapping::Key(mapping_value) => {
+                    debug!("Deactivated {} ({:?})", display_name, mapping_value);
+                }
+            };
         }
     }
     Ok(())
@@ -555,7 +536,7 @@ fn handle_device(
     // Open the device
     let mut gamepad_device = Device::open(device_path)?;
 
-    // Try reading axis info
+    // Read axis info
     let abs_info = gamepad_device.get_abs_state().ok();
     let abs_info_map = abs_info.as_ref().map(|abs_vec| {
         let mut map = HashMap::new();
@@ -567,8 +548,8 @@ fn handle_device(
         map
     });
 
-    // Read kernel keymap
-    let (chrmap, _shifted_chars) = match generate_chrmap() {
+    // Generate character maps
+    let chrmap = match generate_chrmap() {
         Some(maps) => maps,
         None => {
             error!("Failed to generate character map.");
@@ -592,20 +573,10 @@ fn handle_device(
     );
     let normal_mapping = built.normal_mapping;
     let alternate_mapping = built.alternate_mapping;
-    let special_enter_input = built.special_enter_input;
 
     let mut axis_states: HashMap<u16, i32> = HashMap::new();
-    let mut pressed_inputs: HashMap<GamepadInput, bool> = HashMap::new();
-    let mut pressed_axes: HashMap<GamepadInput, PressedMapping> = HashMap::new();
+    let mut pressed_mappings: HashMap<GamepadInput, PressedMapping> = HashMap::new();
     let mut modifiers = config.modifiers.clone();
-    let alt_name = match modifiers.alternate_modifier.clone() {
-        Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
-        None => "ALT".to_string(),
-    };
-    let shift_name = match modifiers.shift_modifier.clone() {
-        Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
-        None => "SHIFT".to_string(),
-    };
 
     debug!("Listening for gamepad events...");
 
@@ -615,50 +586,6 @@ fn handle_device(
             match ev.kind() {
                 InputEventKind::Key(k) => {
                     let gamepad_input = GamepadInput::Button(k);
-
-                    // Handle modifiers
-                    if Some(gamepad_input.clone()) == config.modifiers.shift_modifier {
-                        handle_modifier_state(
-                            &gamepad_input,
-                            "SHIFT",
-                            &ev,
-                            friendly,
-                            config,
-                            &mut modifiers,
-                        );
-                        continue;
-                    }
-                    if Some(gamepad_input.clone()) == config.modifiers.alternate_modifier {
-                        handle_modifier_state(
-                            &gamepad_input,
-                            "ALTERNATE",
-                            &ev,
-                            friendly,
-                            config,
-                            &mut modifiers,
-                        );
-                        continue;
-                    }
-
-                    // Handle special enter
-                    if Some(gamepad_input.clone()) == special_enter_input {
-                        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
-                            Key::KEY_ESC
-                        } else if modifiers.shift_active || modifiers.alternate_active {
-                            Key::KEY_BACKSPACE
-                        } else {
-                            Key::KEY_ENTER
-                        };
-                        let val = ev.value();
-                        let e = InputEvent::new(EventType::KEY, key_to_emit.code(), val);
-                        virtual_keyboard.emit(&[e])?;
-                        let action = if val == 1 { "Activated" } else { "Deactivated" };
-                        let key_str =
-                            get_display_name(&gamepad_input, &config.friendly_names, friendly);
-                        debug!("{} {} ({:?})", action, key_str, key_to_emit);
-                        continue;
-                    }
-
                     let is_pressed = ev.value() == 1;
                     let mapping = if modifiers.alternate_active {
                         &alternate_mapping
@@ -667,84 +594,25 @@ fn handle_device(
                     };
 
                     if is_pressed {
-                        if let Some(mapval) = mapping.get(&gamepad_input) {
-                            match mapval {
-                                Mapping::Character(mut ch) => {
-                                    if modifiers.shift_active {
-                                        ch = shift_transform(ch);
-                                    }
-                                    if let Some(&(keycode, lvl)) = chrmap.get(&ch) {
-                                        handle_kernel_modifier(
-                                            lvl,
-                                            Action::Activate,
-                                            &mut virtual_keyboard,
-                                        )?;
-                                        handle_key_activation(
-                                            &gamepad_input,
-                                            config,
-                                            &mut modifiers,
-                                            keycode,
-                                            &mut virtual_keyboard,
-                                            &mut pressed_inputs,
-                                            friendly,
-                                            &shift_name,
-                                            &alt_name,
-                                            Some(ch),
-                                        )?;
-                                    }
-                                }
-                                Mapping::Key(kc) => {
-                                    handle_key_activation(
-                                        &gamepad_input,
-                                        config,
-                                        &mut modifiers,
-                                        *kc,
-                                        &mut virtual_keyboard,
-                                        &mut pressed_inputs,
-                                        friendly,
-                                        &shift_name,
-                                        &alt_name,
-                                        None,
-                                    )?;
-                                }
-                            }
-                        }
+                        activate_mapping(
+                            &gamepad_input,
+                            config,
+                            mapping,
+                            &chrmap,
+                            &mut virtual_keyboard,
+                            &mut pressed_mappings,
+                            &mut modifiers,
+                            friendly,
+                        )?;
                     } else {
-                        // Release
-                        let display_name = get_display_name(&gamepad_input, &config.friendly_names, friendly);
-                        if let Some(&was_alt) = pressed_inputs.get(&gamepad_input) {
-                            let mapval = if was_alt {
-                                &alternate_mapping
-                            } else {
-                                &normal_mapping
-                            };
-                            if let Some(mapping_value) = mapval.get(&gamepad_input) {
-                                match mapping_value {
-                                    Mapping::Character(mut ch) => {
-                                        if modifiers.shift_active {
-                                            ch = shift_transform(ch);
-                                        }
-                                        if let Some(&(keycode, lvl)) = chrmap.get(&ch) {
-                                            let e =
-                                                InputEvent::new(EventType::KEY, keycode.code(), 0);
-                                            virtual_keyboard.emit(&[e])?;
-                                            handle_kernel_modifier(
-                                                lvl,
-                                                Action::Deactivate,
-                                                &mut virtual_keyboard,
-                                            )?;
-                                        }
-                                        debug!("Deactivated {:?} ({})", display_name, ch);
-                                    }
-                                    Mapping::Key(kc) => {
-                                        let e = InputEvent::new(EventType::KEY, kc.code(), 0);
-                                        virtual_keyboard.emit(&[e])?;
-                                        debug!("Deactivated {:?} ({:?})", display_name, e);
-                                    }
-                                }
-                            }
-                            pressed_inputs.remove(&gamepad_input);
-                        }
+                        release_mapping(
+                            &gamepad_input,
+                            mapping,
+                            &mut virtual_keyboard,
+                            &mut pressed_mappings,
+                            &mut modifiers,
+                            &get_display_name(&gamepad_input, &config.friendly_names, friendly),
+                        )?;
                     }
                 }
 
@@ -761,67 +629,57 @@ fn handle_device(
                                 &normal_mapping
                             };
 
-                            // Negative direction
+                            // Negative direction activation
                             if abs_i.minimum < 0 && axis_value <= rel_thr && old_val > rel_thr {
                                 let neg_input = GamepadInput::Axis(ax.0, Direction::Negative);
-                                handle_axis_activation(
-                                    neg_input,
-                                    &current_mapping,
-                                    &chrmap,
-                                    &mut pressed_axes,
+                                activate_mapping(
+                                    &neg_input,
                                     config,
-                                    &mut modifiers,
+                                    current_mapping,
+                                    &chrmap,
                                     &mut virtual_keyboard,
+                                    &mut pressed_mappings,
+                                    &mut modifiers,
                                     friendly,
-                                    &shift_name,
-                                    &alt_name,
                                 )?;
                             }
-                            // Positive direction
+                            // Positive direction activation
                             else if abs_i.maximum > 0
                                 && axis_value >= act_thr
                                 && old_val < act_thr
                             {
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
-                                handle_axis_activation(
-                                    pos_input,
-                                    &current_mapping,
-                                    &chrmap,
-                                    &mut pressed_axes,
+                                activate_mapping(
+                                    &pos_input,
                                     config,
-                                    &mut modifiers,
+                                    current_mapping,
+                                    &chrmap,
                                     &mut virtual_keyboard,
+                                    &mut pressed_mappings,
+                                    &mut modifiers,
                                     friendly,
-                                    &shift_name,
-                                    &alt_name,
                                 )?;
                             }
                             // Release
                             else if axis_value.abs() < act_thr && old_val.abs() >= act_thr {
                                 let neg_input = GamepadInput::Axis(ax.0, Direction::Negative);
-                                if let Some(mval) = current_mapping.get(&neg_input) {
-                                    handle_mapping_release(
-                                        &neg_input,
-                                        mval,
-                                        &mut virtual_keyboard,
-                                        &mut pressed_axes,
-                                        config,
-                                        &modifiers,
-                                        friendly,
-                                    )?;
-                                }
+                                release_mapping(
+                                    &neg_input,
+                                    current_mapping,
+                                    &mut virtual_keyboard,
+                                    &mut pressed_mappings,
+                                    &mut modifiers,
+                                    &get_display_name(&neg_input, &config.friendly_names, friendly),
+                                )?;
                                 let pos_input = GamepadInput::Axis(ax.0, Direction::Positive);
-                                if let Some(mval) = current_mapping.get(&pos_input) {
-                                    handle_mapping_release(
-                                        &pos_input,
-                                        mval,
-                                        &mut virtual_keyboard,
-                                        &mut pressed_axes,
-                                        config,
-                                        &modifiers,
-                                        friendly,
-                                    )?;
-                                }
+                                release_mapping(
+                                    &pos_input,
+                                    current_mapping,
+                                    &mut virtual_keyboard,
+                                    &mut pressed_mappings,
+                                    &mut modifiers,
+                                    &get_display_name(&pos_input, &config.friendly_names, friendly),
+                                )?;
                             }
                         }
                     }

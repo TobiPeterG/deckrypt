@@ -32,9 +32,6 @@ pub fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
 /// Convert a string like "ENTER" -> Key::KEY_ENTER, etc.
 pub fn key_name_to_key(name: &str) -> Option<Key> {
     match name {
-        "ENTER" => Some(Key::KEY_ENTER),
-        "ESCAPE" => Some(Key::KEY_ESC),
-        "BACKSPACE" => Some(Key::KEY_BACKSPACE),
         "BTN_SOUTH" => Some(Key::BTN_SOUTH),
         "BTN_NORTH" => Some(Key::BTN_NORTH),
         "BTN_WEST" => Some(Key::BTN_WEST),
@@ -139,14 +136,33 @@ pub fn parse_controller_config(
 
                 // parse "axes"
                 if let Some(axes) = toml_val.get("axes").and_then(|v| v.as_table()) {
-                    for (axis_name, value) in axes {
-                        if let Some(axis_values) = value.as_table() {
-                            // We might have e.g. axes.ABS_X.negative, axes.ABS_X.positive
-                            // so parse "negative" => parse_gamepad_input("ABS_X_NEG") etc.
-                            if let Some(neg_value) = axis_values.get("negative") {
-                                let neg_input_str = format!("{}_NEG", axis_name);
-                                if let Some(gi) = parse_gamepad_input(&neg_input_str) {
-                                    match gi {
+                    for (axis_key, value) in axes {
+                        // Check if the key ends with "_NEG" or "_POS"
+                        if axis_key.ends_with("_NEG") || axis_key.ends_with("_POS") {
+                            // Split the key into axis name and direction
+                            let parts: Vec<&str> = axis_key.rsplitn(2, '_').collect();
+                            if parts.len() == 2 {
+                                let direction_str = parts[0];
+                                let axis_name = parts[1];
+                                let direction = match direction_str {
+                                    "NEG" => Direction::Negative,
+                                    "POS" => Direction::Positive,
+                                    _ => {
+                                        warn!(
+                                            "Invalid direction '{}' in axis key '{}'. Skipping.",
+                                            direction_str, axis_key
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                // Convert axis_name to AbsoluteAxisType
+                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
+                                {
+                                    let g_input = GamepadInput::Axis(axis_type.0, direction);
+
+                                    // Add to required sets
+                                    match g_input {
                                         GamepadInput::Button(k) => {
                                             ctrl_cfg.required_buttons.insert(k);
                                         }
@@ -154,33 +170,23 @@ pub fn parse_controller_config(
                                             ctrl_cfg.required_axes.insert(ax);
                                         }
                                     }
-                                    if let Some(mapping) = parse_mapping(neg_value) {
-                                        ctrl_cfg.axis_mappings.push((gi, mapping));
+
+                                    // Parse the mapping value
+                                    if let Some(mapping) = parse_mapping(value) {
+                                        ctrl_cfg.axis_mappings.push((g_input, mapping));
                                     }
-                                }
-                            }
-                            if let Some(pos_value) = axis_values.get("positive") {
-                                let pos_input_str = format!("{}_POS", axis_name);
-                                if let Some(gi) = parse_gamepad_input(&pos_input_str) {
-                                    match gi {
-                                        GamepadInput::Button(k) => {
-                                            ctrl_cfg.required_buttons.insert(k);
-                                        }
-                                        GamepadInput::Axis(ax, _) => {
-                                            ctrl_cfg.required_axes.insert(ax);
-                                        }
-                                    }
-                                    if let Some(mapping) = parse_mapping(pos_value) {
-                                        ctrl_cfg.axis_mappings.push((gi, mapping));
-                                    }
+                                } else {
+                                    warn!(
+                                        "Unknown axis name '{}' in axis key '{}'. Skipping.",
+                                        axis_name, axis_key
+                                    );
                                 }
                             }
                         } else {
-                            // If it's not an object with "negative"/"positive",
-                            // maybe it’s a direct axis name
-                            if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
-                                ctrl_cfg.required_axes.insert(axis_type.0);
-                            }
+                            warn!(
+                                "Axis key '{}' does not specify direction. Skipping.",
+                                axis_key
+                            );
                         }
                     }
                 }
@@ -207,12 +213,29 @@ pub fn parse_controller_config(
 
                 // parse "alternate_axes"
                 if let Some(axes) = toml_val.get("alternate_axes").and_then(|v| v.as_table()) {
-                    for (axis_name, value) in axes {
-                        if let Some(axis_values) = value.as_table() {
-                            if let Some(neg_value) = axis_values.get("negative") {
-                                let neg_input_str = format!("{}_NEG", axis_name);
-                                if let Some(gi) = parse_gamepad_input(&neg_input_str) {
-                                    match gi {
+                    for (axis_key, value) in axes {
+                        if axis_key.ends_with("_NEG") || axis_key.ends_with("_POS") {
+                            let parts: Vec<&str> = axis_key.rsplitn(2, '_').collect();
+                            if parts.len() == 2 {
+                                let direction_str = parts[0];
+                                let axis_name = parts[1];
+                                let direction = match direction_str {
+                                    "NEG" => Direction::Negative,
+                                    "POS" => Direction::Positive,
+                                    _ => {
+                                        warn!(
+                                            "Invalid direction '{}' in alternate axis key '{}'. Skipping.",
+                                            direction_str, axis_key
+                                        );
+                                        continue;
+                                    }
+                                };
+
+                                if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name)
+                                {
+                                    let g_input = GamepadInput::Axis(axis_type.0, direction);
+
+                                    match g_input {
                                         GamepadInput::Button(k) => {
                                             ctrl_cfg.required_buttons.insert(k);
                                         }
@@ -220,31 +243,22 @@ pub fn parse_controller_config(
                                             ctrl_cfg.required_axes.insert(ax);
                                         }
                                     }
-                                    if let Some(mapping) = parse_mapping(neg_value) {
-                                        ctrl_cfg.alternate_axis_mappings.push((gi, mapping));
+
+                                    if let Some(mapping) = parse_mapping(value) {
+                                        ctrl_cfg.alternate_axis_mappings.push((g_input, mapping));
                                     }
-                                }
-                            }
-                            if let Some(pos_value) = axis_values.get("positive") {
-                                let pos_input_str = format!("{}_POS", axis_name);
-                                if let Some(gi) = parse_gamepad_input(&pos_input_str) {
-                                    match gi {
-                                        GamepadInput::Button(k) => {
-                                            ctrl_cfg.required_buttons.insert(k);
-                                        }
-                                        GamepadInput::Axis(ax, _) => {
-                                            ctrl_cfg.required_axes.insert(ax);
-                                        }
-                                    }
-                                    if let Some(mapping) = parse_mapping(pos_value) {
-                                        ctrl_cfg.alternate_axis_mappings.push((gi, mapping));
-                                    }
+                                } else {
+                                    warn!(
+                                        "Unknown axis name '{}' in alternate axis key '{}'. Skipping.",
+                                        axis_name, axis_key
+                                    );
                                 }
                             }
                         } else {
-                            if let Some(axis_type) = axis_name_to_absolute_axis_type(axis_name) {
-                                ctrl_cfg.required_axes.insert(axis_type.0);
-                            }
+                            warn!(
+                                "Alternate axis key '{}' does not specify direction. Skipping.",
+                                axis_key
+                            );
                         }
                     }
                 }
@@ -277,6 +291,20 @@ pub fn parse_controller_config(
                                 }
                             }
                             ctrl_cfg.modifiers.alternate_modifier = Some(mod_input);
+                        }
+                    }
+
+                    if let Some(enter_key) = mods.get("enter_key").and_then(|v| v.as_str()) {
+                        if let Some(mod_input) = parse_gamepad_input(enter_key) {
+                            match mod_input {
+                                GamepadInput::Button(k) => {
+                                    ctrl_cfg.required_buttons.insert(k);
+                                }
+                                GamepadInput::Axis(ax, _) => {
+                                    ctrl_cfg.required_axes.insert(ax);
+                                }
+                            }
+                            ctrl_cfg.modifiers.enter_modifier = Some(mod_input);
                         }
                     }
                 }

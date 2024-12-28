@@ -43,7 +43,7 @@ const KT_LETTER: c_int = 11;
 /// This uses `libkeymap` to read key definitions at different levels (0,1,2).
 /// We also detect ENTER (which can show up differently) and build a secondary map
 /// of digit -> shifted digit if applicable. Returns `None` if unable to read from any suitable TTY/console.
-pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char>)> {
+pub fn generate_chrmap() -> Option<HashMap<char, (Key, u8)>> {
     let mut fd: Option<File> = None;
 
     // Try environment TTY, /dev/console, or /dev/tty0
@@ -85,7 +85,6 @@ pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char
         }
 
         let mut chrmap = HashMap::new();
-        let mut shifted_chars = HashMap::new();
 
         const KEY_MAX: u16 = 255;
 
@@ -111,16 +110,10 @@ pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char
                     chrmap.insert('\n', (keycode, modifier));
                 }
             }
-            // Build shifted_chars mapping for digits
-            if let (Some(c0), Some(c1)) = (chars[0], chars[1]) {
-                if c0.is_ascii_digit() {
-                    shifted_chars.insert(c0, c1);
-                }
-            }
         }
 
         lk_free(ctx);
-        Some((chrmap, shifted_chars))
+        Some(chrmap)
     }
 }
 
@@ -128,25 +121,22 @@ pub fn generate_chrmap() -> Option<(HashMap<char, (Key, u8)>, HashMap<char, char
 // This list should include all characters handled by `shift_transform`.
 pub const ALLOWED_CHARACTERS: &[char] = &[
     // Letters
-    'a','b','c','d','e','f','g','h','i','j','k','l','m',
-    'n','o','p','q','r','s','t','u','v','w','x','y','z',
-    
-    // Digits
-    '1','2','3','4','5','6','7','8','9','0',
-    
-    // Common Symbols
-    '-', '=', '[', ']', '\\', ';', '\'', ',', '.', '/', '`',
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
+    't', 'u', 'v', 'w', 'x', 'y', 'z',
+    '1', '2', '3', '4', '5', '6', '7', '8', '9', '0',  // Digits
+    '-', '=', '[', ']', '\\', ';', '\'', ',', '.', '/', // Common Symbols
+    '`',
     // Add more symbols here if `shift_transform` is expanded
 ];
 
 /// Transforms a character to its shifted counterpart.
-/// 
+///
 /// This function mimics the behavior of holding down the Shift key on a standard US QWERTY keyboard.
 /// It handles:
 /// - Lowercase letters to uppercase letters.
 /// - Numbers to their corresponding symbols.
 /// - Common symbols to their shifted versions.
-/// 
+///
 /// # Parameters
 /// - `c`: The input character to be transformed.
 ///
@@ -158,15 +148,28 @@ pub fn shift_transform(c: char) -> char {
         'a'..='z' => (c as u8 - b'a' + b'A') as char,
 
         // Numbers: 0-9 to corresponding symbols
-        '1' => '!', '2' => '@', '3' => '#', '4' => '$',
-        '5' => '%', '6' => '^', '7' => '&', '8' => '*',
-        '9' => '(', '0' => ')',
+        '1' => '!',
+        '2' => '@',
+        '3' => '#',
+        '4' => '$',
+        '5' => '%',
+        '6' => '^',
+        '7' => '&',
+        '8' => '*',
+        '9' => '(',
+        '0' => ')',
 
         // Symbols: Map to their shifted counterparts
-        '-' => '_', '=' => '+',
-        '[' => '{', ']' => '}', '\\' => '|',
-        ';' => ':', '\'' => '"',
-        ',' => '<', '.' => '>', '/' => '?',
+        '-' => '_',
+        '=' => '+',
+        '[' => '{',
+        ']' => '}',
+        '\\' => '|',
+        ';' => ':',
+        '\'' => '"',
+        ',' => '<',
+        '.' => '>',
+        '/' => '?',
         '`' => '~',
 
         // Space and other non-mappable characters remain unchanged
