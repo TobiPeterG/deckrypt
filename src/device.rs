@@ -1,8 +1,10 @@
 use evdev::Device;
+use libc::{getpwnam, passwd};
 use log::{debug, error, warn};
 use std::collections::HashMap;
+use std::ffi::CString;
 use std::os::unix::fs::FileTypeExt;
-use std::{fs, io};
+use std::{env, fs, io};
 
 use crate::cli::Args;
 use crate::config::parse_controller_config;
@@ -32,10 +34,39 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
                         let vendor_id = device.input_id().vendor();
                         let product_id = device.input_id().product();
 
+                        let sudo_user = env::var("SUDO_USER").unwrap_or("root".to_string());
+
+                        // Convert user name to C string
+                        let c_user = CString::new(sudo_user.clone()).unwrap();
+
+                        let mut home_str = "/root".to_string();
+
+                        // Call getpwnam
+                        unsafe {
+                            let pwd: *mut passwd = getpwnam(c_user.as_ptr());
+                            if pwd.is_null() {
+                                error!("User {} not found", sudo_user);
+                            } else {
+                                // Access home directory from the returned struct
+                                let home_dir = (*pwd).pw_dir;
+                                if !home_dir.is_null() {
+                                    home_str = std::ffi::CStr::from_ptr(home_dir)
+                                        .to_string_lossy()
+                                        .into_owned();
+                                } else {
+                                    error!("HOME directory could not be identified.");
+                                }
+                            }
+                        }
+
                         // Possible config file paths
                         let config_paths = vec![
-                            format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
+                            format!(
+                                "{}/.local/share/deckrypt/{}_{}.toml",
+                                home_str, vendor_id, product_id
+                            ),
                             format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
+                            format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
                         ];
 
                         // Check if at least one config file path exists
