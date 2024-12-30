@@ -66,19 +66,26 @@ impl fmt::Debug for GamepadInput {
     }
 }
 
+/// Represents a single device definition from the config.
+#[derive(Debug, Clone)]
+pub struct ConfigDevice {
+    pub vendor: String,
+    pub product: String,
+}
+
 /// The overall controller config that is parsed from a TOML file.  
 /// It includes sets of required buttons/axes, manual mappings, axis mappings, alternate mappings, etc.
 #[derive(Clone, Debug)]
 pub struct ControllerConfig {
     pub required_buttons: HashSet<Key>,
     pub required_axes: HashSet<u16>,
-
     pub manual_mappings: Vec<(GamepadInput, Mapping)>,
     pub axis_mappings: Vec<(GamepadInput, Mapping)>,
     pub alternate_manual_mappings: Vec<(GamepadInput, Mapping)>,
     pub alternate_axis_mappings: Vec<(GamepadInput, Mapping)>,
     pub modifiers: Modifiers,
     pub friendly_names: HashMap<GamepadInput, String>,
+    pub devices: Vec<ConfigDevice>,
 }
 
 /// A fully built set of normal & alternate mappings, along with a special Enter input if one is discovered.  

@@ -1,5 +1,5 @@
 use crate::keymap::ALLOWED_CHARACTERS;
-use crate::types::ControllerConfig;
+use crate::types::{ConfigDevice, ControllerConfig};
 use std::collections::HashSet;
 use std::io::Read;
 use std::{collections::HashMap, fs::File};
@@ -111,6 +111,7 @@ pub fn parse_controller_config(
                     alternate_axis_mappings: vec![],
                     modifiers: Modifiers::default(),
                     friendly_names: HashMap::new(),
+                    devices: Vec::new(),
                 };
 
                 // parse "buttons"
@@ -322,6 +323,28 @@ pub fn parse_controller_config(
                         }
                     }
                 }
+
+                // parse "devices"
+                if let Some(devices_val) = toml_val.get("devices") {
+                    if let Some(devices_arr) = devices_val.as_array() {
+                        for device_val in devices_arr {
+                            if let Some(table) = device_val.as_table() {
+                                let vendor =
+                                    table.get("vendor").and_then(|v| v.as_str()).unwrap_or("");
+                                let product =
+                                    table.get("product").and_then(|v| v.as_str()).unwrap_or("");
+                                // Add to ctrl_cfg
+                                if !vendor.is_empty() && !product.is_empty() {
+                                    ctrl_cfg.devices.push(ConfigDevice {
+                                        vendor: vendor.to_string(),
+                                        product: product.to_string(),
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+
                 debug!("Loaded config file from '{}'", config_file_path);
 
                 return Some(ctrl_cfg);

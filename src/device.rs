@@ -6,7 +6,9 @@ use std::{fs, io};
 
 use crate::cli::Args;
 use crate::config::parse_controller_config;
-use crate::types::{ControllerConfig, KnownDeviceUnparsed, SelectedDevice, UnknownDevice};
+use crate::types::{
+    ConfigDevice, ControllerConfig, KnownDeviceUnparsed, SelectedDevice, UnknownDevice,
+};
 
 /// Scans `/dev/input` for devices and checks if each device has a corresponding Deckrypt config file.
 ///  
@@ -116,6 +118,62 @@ fn device_supports_config(device: &Device, config: &ControllerConfig) -> bool {
     }
 }
 
+fn load_and_validate(
+    config_path: &String,
+    devices: &Vec<KnownDeviceUnparsed>,
+) -> Option<Vec<KnownDeviceUnparsed>> {
+    // Load the configuration
+    let config = match parse_controller_config(
+        devices[0].vendor_id,
+        devices[0].product_id,
+        config_path.clone(),
+    ) {
+        Some(cfg) => cfg,
+        None => {
+            error!(
+                "Failed to parse config file '{}'. Skipping devices with this config.",
+                config_path
+            );
+            return None;
+        }
+    };
+
+    // Validate each device in the group
+    let mut valid_devices = Vec::new();
+    for device in devices {
+        // Open the device
+        let device_path = &device.path;
+        match Device::open(device_path) {
+            Ok(dev) => {
+                if device_supports_config(&dev, &config) {
+                    valid_devices.push(device.clone());
+                } else {
+                    warn!(
+                        "Device '{}' (VID {:04x}, PID {:04x}) does not support all required buttons and will be excluded.",
+                        device.name, device.vendor_id, device.product_id
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to open device '{}': {}. It will be excluded from selection.",
+                    device.path, e
+                );
+            }
+        }
+    }
+
+    if valid_devices.is_empty() {
+        warn!(
+            "No devices found supporting all required buttons for config '{}'.",
+            config_path
+        );
+        return None;
+    }
+
+    Some(valid_devices)
+}
+
 /// Attempts to select a single device based on user arguments and the discovered devices.
 ///
 /// Enhanced to handle multiple devices per config file by validating device capabilities.
@@ -176,54 +234,13 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
     }
 
     for (config_path, devices) in config_to_devices.iter() {
-        // Load the configuration
-        let config = match parse_controller_config(
-            devices[0].vendor_id,
-            devices[0].product_id,
-            config_path.clone(),
-        ) {
-            Some(cfg) => cfg,
-            None => {
-                error!(
-                    "Failed to parse config file '{}'. Skipping devices with this config.",
-                    config_path
-                );
-                continue;
-            }
-        };
-
         // Validate each device in the group
-        let mut valid_devices = Vec::new();
-        for device in devices {
-            // Open the device
-            let device_path = &device.path;
-            match Device::open(device_path) {
-                Ok(dev) => {
-                    if device_supports_config(&dev, &config) {
-                        valid_devices.push(device.clone());
-                    } else {
-                        warn!(
-                            "Device '{}' (VID {:04x}, PID {:04x}) does not support all required buttons and will be excluded.",
-                            device.name, device.vendor_id, device.product_id
-                        );
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to open device '{}': {}. It will be excluded from selection.",
-                        device.path, e
-                    );
-                }
-            }
-        }
+        let pot_valid_devices = load_and_validate(config_path, devices);
 
-        if valid_devices.is_empty() {
-            warn!(
-                "No devices found supporting all required buttons for config '{}'.",
-                config_path
-            );
-            continue;
-        }
+        let valid_devices = match pot_valid_devices {
+            Some(val_dev) => val_dev,
+            None => continue,
+        };
 
         // Selection logic based on the number of valid devices
         if valid_devices.len() == 1 {
@@ -280,4 +297,52 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
     }
     error!("No supported devices found after validation.");
     None
+}
+
+pub fn get_device_ids() -> Vec<ConfigDevice> {
+    // We only show devices from config files that have a supported controller connected, then exit.
+    // It doesn't make sense to show all devices as we still need a controller
+    let (known_devices, _) = scan_devices_for_config();
+
+    // Group known devices by their config file path
+    let mut config_to_devices: HashMap<String, Vec<KnownDeviceUnparsed>> = HashMap::new();
+    for device in known_devices {
+        config_to_devices
+            .entry(device.config_file_path.clone())
+            .or_default()
+            .push(device);
+    }
+
+    let mut hardware_devices = Vec::new();
+    for (config_path, devices) in config_to_devices.iter() {
+        // Validate each device in the group
+        let pot_valid_devices = load_and_validate(config_path, devices);
+
+        let valid_devices;
+        match pot_valid_devices {
+            Some(val_dev) => valid_devices = val_dev,
+            None => continue,
+        };
+
+        for device in valid_devices {
+            let parsed_cfg = match crate::config::parse_controller_config(
+                device.vendor_id,
+                device.product_id,
+                device.config_file_path.clone(),
+            ) {
+                Some(cfg) => cfg,
+                None => {
+                    warn!(
+                        "Failed to parse config for device {} ({})",
+                        device.name, device.config_file_path
+                    );
+                    continue;
+                }
+            };
+            for hardware_device in parsed_cfg.devices {
+                hardware_devices.push(hardware_device);
+            }
+        }
+    }
+    hardware_devices
 }

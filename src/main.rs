@@ -38,6 +38,14 @@ fn main() -> io::Result<()> {
         }
     }
 
+    if args.show_devices {
+        let hardware_devices = crate::device::get_device_ids();
+        for device in hardware_devices {
+            println!("Vendor: '{}', Product: '{}'", device.vendor, device.product)
+        }
+        std::process::exit(0);
+    }
+
     if args.continuously_search {
         loop {
             match input::run_main_loop(&args) {

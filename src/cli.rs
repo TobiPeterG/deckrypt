@@ -26,22 +26,26 @@ pub struct Args {
     pub unknown: bool,
 
     /// Automatically select the first device if multiple devices are found (not compatible with -u)
-    #[arg(short = 'a', long)]
+    #[arg(short, long)]
     pub auto_select: bool,
 
     /// Continuously search for devices with a config file (not compatible with -u)
-    #[arg(short = 'c', long)]
+    #[arg(short, long)]
     pub continuously_search: bool,
 
     /// Automatically map unassigned gamepad inputs
-    #[arg(short = 'm', long)]
+    #[arg(short, long)]
     pub mapping: bool,
 
     /// Enable friendly logging output
-    #[arg(short = 'f', long = "friendly")]
+    #[arg(short, long)]
     pub friendly: bool,
 
     /// Test if a supported device is connected
-    #[arg(short = 't', long = "test")]
+    #[arg(short, long)]
     pub test: bool,
+
+    /// Print devices defined in config files and exit
+    #[arg(short = 'd', long = "devices")]
+    pub show_devices: bool,
 }

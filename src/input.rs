@@ -736,7 +736,8 @@ pub fn run_main_loop(args: &crate::cli::Args) -> std::io::Result<()> {
                 alternate_manual_mappings: vec![],
                 alternate_axis_mappings: vec![],
                 modifiers: Modifiers::default(),
-                friendly_names: HashMap::new(), // No friendly names for unknown devices
+                friendly_names: HashMap::new(),
+                devices: Vec::new(),
             };
 
             // Handle the device with automatic mapping enabled
