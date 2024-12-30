@@ -62,11 +62,11 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
                         // Possible config file paths
                         let config_paths = vec![
                             format!(
-                                "{}/.local/share/deckrypt/{}_{}.toml",
+                                "{}/.local/share/deckrypt/{:04x}_{:04x}.toml",
                                 home_str, vendor_id, product_id
                             ),
-                            format!("/etc/deckrypt/{}_{}.toml", vendor_id, product_id),
-                            format!("/usr/share/deckrypt/{}_{}.toml", vendor_id, product_id),
+                            format!("/etc/deckrypt/{:04x}_{:04x}.toml", vendor_id, product_id),
+                            format!("/usr/share/deckrypt/{:04x}_{:04x}.toml", vendor_id, product_id),
                         ];
 
                         // Check if at least one config file path exists
