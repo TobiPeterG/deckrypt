@@ -347,6 +347,32 @@ fn press_key(
     Ok(())
 }
 
+fn print_friendly_input(
+    config: &ControllerConfig,
+    modifiers: &mut Modifiers,
+    friendly: bool,
+    display_name: &String,
+) {
+    let mut log_str = display_name.clone();
+    if friendly == true {
+        if modifiers.shift_active {
+            let shift_name = match &modifiers.shift_modifier {
+                Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
+                None => "SHIFT".to_string(),
+            };
+            log_str = format!("{} + {}", shift_name, log_str);
+        }
+        if modifiers.alternate_active {
+            let alt_name = match &modifiers.alternate_modifier {
+                Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
+                None => "ALTERNATE".to_string(),
+            };
+            log_str = format!("{} + {}", alt_name, log_str);
+        }
+        println!("{}", log_str);
+    }
+}
+
 /// Generalized function to handle activation of a mapping (button or axis).
 fn activate_mapping(
     gamepad_input: &GamepadInput,
@@ -385,28 +411,11 @@ fn activate_mapping(
             gamepad_input,
         )?;
         debug!("Activated {} ({:?})", display_name, key_to_emit);
+        print_friendly_input(config, modifiers, friendly, &display_name);
         return Ok(());
     }
-    if let Some(mapping_value) = mapping.get(&gamepad_input) {
-        let mut log_str = display_name.clone();
-        if friendly == true {
-            if modifiers.shift_active {
-                let shift_name = match &modifiers.shift_modifier {
-                    Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
-                    None => "SHIFT".to_string(),
-                };
-                log_str = format!("{} + {}", shift_name, log_str);
-            }
-            if modifiers.alternate_active {
-                let alt_name = match &modifiers.alternate_modifier {
-                    Some(modifier) => get_display_name(&modifier, &config.friendly_names, friendly),
-                    None => "ALTERNATE".to_string(),
-                };
-                log_str = format!("{} + {}", alt_name, log_str);
-            }
-            println!("{}", log_str);
-        }
 
+    if let Some(mapping_value) = mapping.get(&gamepad_input) {
         match mapping_value {
             Mapping::Character(mut ch) => {
                 // Apply shift if active
@@ -444,6 +453,7 @@ fn activate_mapping(
                 debug!("Activated {} ({:?})", display_name, kc);
             }
         }
+        print_friendly_input(config, modifiers, friendly, &display_name);
     }
     Ok(())
 }
