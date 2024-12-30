@@ -63,14 +63,14 @@ fn main() -> io::Result<()> {
         match input::run_main_loop(&args) {
             Ok(_) => {
                 info!("deckrypt stopped without error; exiting...");
+                std::process::exit(0);
             }
             Err(e) => {
                 error!("{} Exiting...", e);
+                std::process::exit(1);
             }
         }
     }
-
-    Ok(())
 }
 
 fn initialize_logger(verbosity: u8) {
