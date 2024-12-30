@@ -15,7 +15,7 @@ pub fn parse_mapping(value: &TomlValue) -> Option<Mapping> {
     if let Some(s) = value.as_str() {
         // Single character or known special key
         if s.len() == 1 {
-            let c = s.chars().next().unwrap();
+            let c = s.chars().next().unwrap_or_default();
             if ALLOWED_CHARACTERS.contains(&c) {
                 return Some(Mapping::Character(c));
             } else {

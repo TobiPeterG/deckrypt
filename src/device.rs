@@ -37,7 +37,7 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
                         let sudo_user = env::var("SUDO_USER").unwrap_or("root".to_string());
 
                         // Convert user name to C string
-                        let c_user = CString::new(sudo_user.clone()).unwrap();
+                        let c_user = CString::new(sudo_user.clone()).unwrap_or_default();
 
                         let mut home_str = "/root".to_string();
 
@@ -231,7 +231,7 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
                 );
             }
             print!("Enter the number of the device to use: ");
-            io::stdout().flush().unwrap();
+            io::stdout().flush().unwrap_or_default();
             let mut input = String::new();
             if io::stdin().read_line(&mut input).is_err() {
                 error!("Failed to read input.");
@@ -302,7 +302,7 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
                     );
                 }
                 print!("Enter the number of the device to use: ");
-                io::stdout().flush().unwrap();
+                io::stdout().flush().unwrap_or_default();
                 let mut input = String::new();
                 if io::stdin().read_line(&mut input).is_err() {
                     error!("Failed to read input.");
