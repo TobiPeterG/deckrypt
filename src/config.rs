@@ -333,11 +333,19 @@ pub fn parse_controller_config(
                                     table.get("vendor").and_then(|v| v.as_str()).unwrap_or("");
                                 let product =
                                     table.get("product").and_then(|v| v.as_str()).unwrap_or("");
+                                let device =
+                                    table.get("device").and_then(|v| v.as_str()).unwrap_or("");
+                                let instructions = table
+                                    .get("instructions")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
                                 // Add to ctrl_cfg
                                 if !vendor.is_empty() && !product.is_empty() {
                                     ctrl_cfg.devices.push(ConfigDevice {
                                         vendor: vendor.to_string(),
                                         product: product.to_string(),
+                                        device: device.to_string(),
+                                        instructions: instructions.to_string(),
                                     });
                                 }
                             }

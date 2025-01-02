@@ -41,7 +41,10 @@ fn main() -> io::Result<()> {
     if args.show_devices {
         let hardware_devices = crate::device::get_device_ids();
         for device in hardware_devices {
-            println!("Vendor: '{}', Product: '{}'", device.vendor, device.product)
+            println!(
+                "Vendor: '{}', Product: '{}', Device: '{}', Instructions: '{}'",
+                device.vendor, device.product, device.device, device.instructions
+            )
         }
         std::process::exit(0);
     }

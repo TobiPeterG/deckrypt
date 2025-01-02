@@ -71,6 +71,8 @@ impl fmt::Debug for GamepadInput {
 pub struct ConfigDevice {
     pub vendor: String,
     pub product: String,
+    pub device: String,
+    pub instructions: String,
 }
 
 /// The overall controller config that is parsed from a TOML file.  
