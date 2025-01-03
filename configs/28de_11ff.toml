@@ -1,0 +1,107 @@
+# Steam Deck (LCD)
+
+[[devices]]
+vendor = "Valve"
+product = "Jupiter"
+device = "Steam Deck (LCD)"
+instructions = "To switch the gamepad from \"keyboard/mouse\" to \"gamepad\" mode when asked to enter the password, please long-press the \"Start\" (≡) button until you hear a peep sound. To switch back to \"keyboard/mouse\" mode, repeat the process."
+
+[buttons]
+BTN_SOUTH = "a"
+BTN_EAST = "b"
+BTN_NORTH = "x"
+BTN_WEST = "y"
+
+BTN_THUMBL = ","
+BTN_THUMBR = "."
+
+BTN_SELECT = "-"
+
+# Disabled
+BTN_MODE = ""
+
+[alternate_buttons]
+BTN_SOUTH = "z"
+BTN_EAST = "w"
+BTN_NORTH = "c"
+BTN_WEST = "d"
+
+BTN_THUMBL = ";"
+BTN_THUMBR = "'"
+
+BTN_SELECT = "/"
+
+# Disabled
+BTN_MODE = ""
+
+[axes]
+ABS_X_NEG = "e"
+ABS_X_POS = "f"
+ABS_Y_NEG = "g"
+ABS_Y_POS = "h"
+
+ABS_RX_NEG = "i"
+ABS_RX_POS = "j"
+ABS_RY_NEG = "k"
+ABS_RY_POS = "l"
+
+ABS_HAT0X_NEG = "1"
+ABS_HAT0X_POS = "2"
+ABS_HAT0Y_NEG = "m"
+ABS_HAT0Y_POS = "3"
+
+ABS_Z_POS = "4"
+ABS_RZ_POS = "5"
+
+[alternate_axes]
+ABS_X_NEG = "v"
+ABS_X_POS = "u"
+ABS_Y_NEG = "t"
+ABS_Y_POS = "s"
+
+ABS_RX_NEG = "r"
+ABS_RX_POS = "q"
+ABS_RY_NEG = "p"
+ABS_RY_POS = "o"
+
+ABS_HAT0X_NEG = "0"
+ABS_HAT0X_POS = "9"
+ABS_HAT0Y_NEG = "n"
+ABS_HAT0Y_POS = "8"
+
+ABS_Z_POS = "7"
+ABS_RZ_POS = "6"
+
+[modifiers]
+shift_key = "BTN_TL"
+alternate_key = "BTN_TR"
+enter_key = "BTN_START"
+
+[friendly_names]
+BTN_SOUTH = "A"
+BTN_NORTH = "X"
+BTN_WEST = "Y"
+BTN_EAST = "B"
+ABS_X_NEG = "LS_LEFT"
+ABS_X_POS = "LS_RIGHT"
+ABS_Y_NEG = "LS_UP"
+ABS_Y_POS = "LS_DOWN"
+BTN_THUMBL = "LS"
+ABS_RX_NEG = "RS_LEFT"
+ABS_RX_POS = "RS_RIGHT"
+ABS_RY_NEG = "RS_UP"
+ABS_RY_POS = "RS_DOWN"
+BTN_THUMBR = "RS"
+BTN_TL = "LB"
+ABS_Z_POS = "LT"
+BTN_TR = "RB"
+ABS_RZ_POS = "RT"
+ABS_HAT0X_NEG = "D_PAD_LEFT"
+ABS_HAT0X_POS = "D_PAD_RIGHT"
+ABS_HAT0Y_NEG = "D_PAD_UP"
+ABS_HAT0Y_POS = "D_PAD_DOWN"
+BTN_SELECT = "SELECT"
+BTN_START = "START"
+
+# Disabled
+BTN_MODE = "STEAM"

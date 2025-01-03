@@ -1,0 +1,166 @@
+# Steam Deck (LCD)
+
+[[devices]]
+vendor = "Valve"
+product = "Jupiter"
+device = "Steam Deck (LCD)"
+instructions = "To switch the gamepad from \"keyboard/mouse\" to \"gamepad\" mode when asked to enter the password, please long-press the \"Start\" (≡) button until you hear a peep sound. To switch back to \"keyboard/mouse\" mode, repeat the process."
+
+[buttons]
+BTN_SOUTH = "a"
+BTN_EAST = "b"
+BTN_NORTH = "x"
+BTN_WEST = "y"
+
+BTN_THUMBL = ","
+BTN_THUMBR = "."
+
+BTN_DPAD_LEFT = "1"
+BTN_DPAD_RIGHT = "2"
+BTN_DPAD_UP = "m"
+BTN_DPAD_DOWN = "3"
+
+BTN_TL2 = "4"
+BTN_TR2 = "5"
+
+BTN_SELECT = "-"
+
+# Disabled
+BTN_BASE = ""
+BTN_MODE = ""
+BTN_THUMB = ""
+BTN_THUMB2 = ""
+BTN_TRIGGER_HAPPY1 = ""
+BTN_TRIGGER_HAPPY2 = ""
+BTN_TRIGGER_HAPPY3 = ""
+BTN_TRIGGER_HAPPY4 = ""
+
+[alternate_buttons]
+BTN_SOUTH = "z"
+BTN_EAST = "w"
+BTN_NORTH = "c"
+BTN_WEST = "d"
+
+BTN_THUMBL = ";"
+BTN_THUMBR = "'"
+
+BTN_DPAD_LEFT = "0"
+BTN_DPAD_RIGHT = "9"
+BTN_DPAD_UP = "n"
+BTN_DPAD_DOWN = "8"
+
+BTN_TL2 = "7"
+BTN_TR2 = "6"
+
+BTN_SELECT = "/"
+
+# Disabled
+BTN_BASE = ""
+BTN_MODE = ""
+BTN_THUMB = ""
+BTN_THUMB2 = ""
+BTN_TRIGGER_HAPPY1 = ""
+BTN_TRIGGER_HAPPY2 = ""
+BTN_TRIGGER_HAPPY3 = ""
+BTN_TRIGGER_HAPPY4 = ""
+
+[axes]
+ABS_X_NEG = "e"
+ABS_X_POS = "f"
+ABS_Y_NEG = "g"
+ABS_Y_POS = "h"
+
+ABS_RX_NEG = "i"
+ABS_RX_POS = "j"
+ABS_RY_NEG = "k"
+ABS_RY_POS = "l"
+
+# Disabled
+ABS_HAT0X_NEG = ""
+ABS_HAT0X_POS = ""
+ABS_HAT0Y_NEG = ""
+ABS_HAT0Y_POS = ""
+ABS_HAT1X_NEG = ""
+ABS_HAT1X_POS = ""
+ABS_HAT1Y_NEG = ""
+ABS_HAT1Y_POS = ""
+
+ABS_HAT2X_POS = ""
+ABS_HAT2Y_POS = ""
+
+[alternate_axes]
+ABS_X_NEG = "v"
+ABS_X_POS = "u"
+ABS_Y_NEG = "t"
+ABS_Y_POS = "s"
+
+ABS_RX_NEG = "r"
+ABS_RX_POS = "q"
+ABS_RY_NEG = "p"
+ABS_RY_POS = "o"
+
+# Disabled
+ABS_HAT0X_NEG = ""
+ABS_HAT0X_POS = ""
+ABS_HAT0Y_NEG = ""
+ABS_HAT0Y_POS = ""
+ABS_HAT1X_NEG = ""
+ABS_HAT1X_POS = ""
+ABS_HAT1Y_NEG = ""
+ABS_HAT1Y_POS = ""
+
+ABS_HAT2X_POS = ""
+ABS_HAT2Y_POS = ""
+
+[modifiers]
+shift_key = "BTN_TL"
+alternate_key = "BTN_TR"
+enter_key = "BTN_START"
+
+[friendly_names]
+BTN_SOUTH = "A"
+BTN_NORTH = "X"
+BTN_WEST = "Y"
+BTN_EAST = "B"
+ABS_X_NEG = "LS_LEFT"
+ABS_X_POS = "LS_RIGHT"
+ABS_Y_NEG = "LS_UP"
+ABS_Y_POS = "LS_DOWN"
+BTN_THUMBL = "LS"
+ABS_RX_NEG = "RS_LEFT"
+ABS_RX_POS = "RS_RIGHT"
+ABS_RY_NEG = "RS_UP"
+ABS_RY_POS = "RS_DOWN"
+BTN_THUMBR = "RS"
+BTN_TL = "LB"
+BTN_TL2 = "LT"
+BTN_TR = "RB"
+BTN_TR2 = "RT"
+BTN_DPAD_LEFT = "D_PAD_LEFT"
+BTN_DPAD_RIGHT = "D_PAD_RIGHT"
+BTN_DPAD_UP = "D_PAD_UP"
+BTN_DPAD_DOWN = "D_PAD_DOWN"
+BTN_SELECT = "SELECT"
+BTN_START = "START"
+
+# Disabled
+BTN_BASE = "MENU"
+BTN_MODE = "STEAM"
+BTN_THUMB = "TRACK_PAD_LEFT"
+BTN_THUMB2 = "TRACK_PAD_RIGHT"
+BTN_TRIGGER_HAPPY1 = "LEFT_BACK_PADDLE_UP"
+BTN_TRIGGER_HAPPY2 = "RIGHT_BACK_PADDLE_UP"
+BTN_TRIGGER_HAPPY3 = "LEFT_BACK_PADDLE_DOWN"
+BTN_TRIGGER_HAPPY4 = "LEFT_BACK_PADDLE_DOWN"
+
+ABS_HAT0X_NEG = "LEFT_TRACKPAD_LEFT"
+ABS_HAT0X_POS = "LEFT_TRACKPAD_RIGHT"
+ABS_HAT0Y_NEG = "LEFT_TRACKPAD_DOWN"
+ABS_HAT0Y_POS = "LEFT_TRACKPAD_UP"
+ABS_HAT1X_NEG = "RIGHT_TRACKPAD_LEFT"
+ABS_HAT1X_POS = "RIGHT_TRACKPAD_RIGHT"
+ABS_HAT1Y_NEG = "RIGHT_TRACKPAD_DOWN"
+ABS_HAT1Y_POS = "RIGHT_TRACKPAD_UP"
+
+ABS_HAT2X_POS = "RT2"
+ABS_HAT2Y_POS = "LT2"
