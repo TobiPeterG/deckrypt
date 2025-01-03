@@ -29,6 +29,7 @@ pub enum GamepadInput {
 pub enum Mapping {
     Character(char),
     Key(Key),
+    None,
 }
 
 /// Holds optional modifiers (shift, alternate) which are triggered by specific gamepad inputs.  
@@ -76,14 +77,14 @@ pub struct ConfigDevice {
 }
 
 /// The overall controller config that is parsed from a TOML file.  
-/// It includes sets of required buttons/axes, manual mappings, axis mappings, alternate mappings, etc.
+/// It includes sets of required buttons/axes, button mappings, axis mappings, alternate mappings, etc.
 #[derive(Clone, Debug)]
 pub struct ControllerConfig {
     pub required_buttons: HashSet<Key>,
     pub required_axes: HashSet<u16>,
-    pub manual_mappings: Vec<(GamepadInput, Mapping)>,
+    pub button_mappings: Vec<(GamepadInput, Mapping)>,
     pub axis_mappings: Vec<(GamepadInput, Mapping)>,
-    pub alternate_manual_mappings: Vec<(GamepadInput, Mapping)>,
+    pub alternate_button_mappings: Vec<(GamepadInput, Mapping)>,
     pub alternate_axis_mappings: Vec<(GamepadInput, Mapping)>,
     pub modifiers: Modifiers,
     pub friendly_names: HashMap<GamepadInput, String>,

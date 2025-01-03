@@ -109,7 +109,7 @@ fn get_display_name(
 }
 
 /// Builds up a final set of normal and alternate mappings by:
-/// 1. Using any user-specified manual/axis mappings from the config (which may be empty for unknown).
+/// 1. Using any user-specified button/axis mappings from the config (which may be empty for unknown).
 /// 2. If `auto_mapping_enabled` is `true`, we attempt to determine if the device supports additional
 ///    axes/buttons and automatically assign them characters if they are unmapped.  
 /// 3. Then, if `auto_mapping_enabled` is `true`, we generate alternate mappings for leftover inputs
@@ -125,9 +125,9 @@ fn get_mappings(
     // Controls whether we auto-map leftover inputs:
     auto_mapping_enabled: bool,
 ) -> BuiltMappings {
-    let manual_mappings = &config.manual_mappings;
+    let button_mappings = &config.button_mappings;
     let axis_mappings = &config.axis_mappings;
-    let alternate_manual_mappings = &config.alternate_manual_mappings;
+    let alternate_button_mappings = &config.alternate_button_mappings;
     let alternate_axis_mappings = &config.alternate_axis_mappings;
     let modifiers = &config.modifiers;
 
@@ -148,9 +148,9 @@ fn get_mappings(
     }
 
     // -------------------------------
-    // 1) Insert manual + axis mappings into normal
+    // 1) Insert button + axis mappings into normal
     // -------------------------------
-    for &(ref gi, ref mapping) in manual_mappings {
+    for &(ref gi, ref mapping) in button_mappings {
         normal_mapping.insert(gi.clone(), mapping.clone());
         if let Mapping::Character(c) = mapping {
             used_chars.insert(*c);
@@ -164,9 +164,9 @@ fn get_mappings(
     }
 
     // -------------------------------
-    // 2) Insert alternate manual + axis mappings
+    // 2) Insert alternate button + axis mappings
     // -------------------------------
-    for &(ref gi, ref mapping) in alternate_manual_mappings {
+    for &(ref gi, ref mapping) in alternate_button_mappings {
         alternate_mapping.insert(gi.clone(), mapping.clone());
         if let Mapping::Character(c) = mapping {
             used_chars.insert(*c);
@@ -234,6 +234,7 @@ fn get_mappings(
                 let display_name = get_display_name(&gi, &config.friendly_names, friendly);
                 trace!("Automatically mapped {:?} -> '{}'", display_name, next_char);
             } else {
+                trace!("No more letters available to map.");
                 break;
             }
         }
@@ -257,6 +258,7 @@ fn get_mappings(
                 let display_name = get_display_name(&gi, &config.friendly_names, friendly);
                 trace!("Automatically mapped {:?} -> '{}'", display_name, next_char);
             } else {
+                trace!("No more digits available to map.");
                 break;
             }
         }
@@ -285,45 +287,51 @@ fn get_mappings(
                 let display_name = get_display_name(&gi, &config.friendly_names, friendly);
                 trace!("Automatically mapped {:?} -> '{}'", display_name, next_char);
             } else {
+                trace!("No more symbols available to map.");
                 break;
             }
         }
-    }
 
-    // -------------------------------
-    // 6) For the alternate mapping, fill in reversed leftover
-    // but only if auto_mapping_enabled
-    // -------------------------------
-    if auto_mapping_enabled {
-        // Mark used chars from both normal and alternate
-        for mapping in normal_mapping.values().chain(alternate_mapping.values()) {
-            if let Mapping::Character(c) = mapping {
-                used_chars.insert(*c);
-            }
-        }
-        let available_alternate_gamepad_inputs: Vec<_> = all_gamepad_inputs
-            .iter()
-            .filter(|gi| !alternate_mapping.contains_key(*gi))
-            .cloned()
-            .collect();
-
-        // Collect all available characters for alternate mapping in the correct order
-        let mut alternate_chars_iter = ALLOWED_CHARACTERS
-            .iter()
-            .cloned()
-            .filter(|c| !used_chars.contains(c))
-            .collect::<Vec<char>>()
-            .into_iter();
-
-        for gi in &available_alternate_gamepad_inputs {
-            if !alternate_mapping.contains_key(gi) {
-                if let Some(c) = alternate_chars_iter.next() {
-                    alternate_mapping.insert(gi.clone(), Mapping::Character(c));
-                    used_chars.insert(c);
-                    let display_name = get_display_name(&gi, &config.friendly_names, friendly);
-                    trace!("Alternate mapped {:?} -> '{}'", display_name, c);
+        // -------------------------------
+        // 6) For the alternate mapping, fill in reversed leftover
+        // but only if there are actually characters left
+        // -------------------------------
+        if symbols_iter.next() != None {
+            // Mark used chars from both normal and alternate
+            for mapping in normal_mapping.values().chain(alternate_mapping.values()) {
+                if let Mapping::Character(c) = mapping {
+                    used_chars.insert(*c);
                 }
             }
+            let available_alternate_gamepad_inputs: Vec<_> = all_gamepad_inputs
+                .iter()
+                .filter(|gi| !alternate_mapping.contains_key(*gi))
+                .cloned()
+                .collect();
+
+            // Collect all available characters for alternate mapping in the correct order
+            let mut alternate_chars_iter = ALLOWED_CHARACTERS
+                .iter()
+                .cloned()
+                .filter(|c| !used_chars.contains(c))
+                .collect::<Vec<char>>()
+                .into_iter();
+
+            for gi in &available_alternate_gamepad_inputs {
+                if !alternate_mapping.contains_key(gi) {
+                    if let Some(c) = alternate_chars_iter.next() {
+                        alternate_mapping.insert(gi.clone(), Mapping::Character(c));
+                        used_chars.insert(c);
+                        let display_name = get_display_name(&gi, &config.friendly_names, friendly);
+                        trace!("Alternate mapped {:?} -> '{}'", display_name, c);
+                    } else {
+                        trace!("No more characters available to map for alternate mode.");
+                        break;
+                    }
+                }
+            }
+        } else {
+            trace!("No characters available to map for alternate mode.");
         }
     }
 
@@ -452,6 +460,7 @@ fn activate_mapping(
 
                 debug!("Activated {} ({:?})", display_name, kc);
             }
+            Mapping::None => return Ok(()),
         }
         print_friendly_input(config, modifiers, friendly, &display_name);
     }
@@ -518,6 +527,7 @@ fn release_mapping(
                 Mapping::Key(mapping_value) => {
                     debug!("Deactivated {} ({:?})", display_name, mapping_value);
                 }
+                Mapping::None => return Ok(()),
             };
         }
     }
@@ -741,9 +751,9 @@ pub fn run_main_loop(args: &crate::cli::Args) -> std::io::Result<()> {
             let ephemeral_cfg = ControllerConfig {
                 required_buttons: HashSet::new(),
                 required_axes: HashSet::new(),
-                manual_mappings: vec![],
+                button_mappings: vec![],
                 axis_mappings: vec![],
-                alternate_manual_mappings: vec![],
+                alternate_button_mappings: vec![],
                 alternate_axis_mappings: vec![],
                 modifiers: Modifiers::default(),
                 friendly_names: HashMap::new(),

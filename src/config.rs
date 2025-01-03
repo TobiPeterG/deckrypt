@@ -38,11 +38,24 @@ pub fn key_name_to_key(name: &str) -> Option<Key> {
         "BTN_EAST" => Some(Key::BTN_EAST),
         "BTN_TL" => Some(Key::BTN_TL),
         "BTN_TR" => Some(Key::BTN_TR),
+        "BTN_TL2" => Some(Key::BTN_TL2),
+        "BTN_TR2" => Some(Key::BTN_TR2),
         "BTN_SELECT" => Some(Key::BTN_SELECT),
         "BTN_START" => Some(Key::BTN_START),
         "BTN_MODE" => Some(Key::BTN_MODE),
+        "BTN_BASE" => Some(Key::BTN_BASE),
         "BTN_THUMBL" => Some(Key::BTN_THUMBL),
         "BTN_THUMBR" => Some(Key::BTN_THUMBR),
+        "BTN_THUMB" => Some(Key::BTN_THUMB),
+        "BTN_THUMB2" => Some(Key::BTN_THUMB2),
+        "BTN_DPAD_UP" => Some(Key::BTN_DPAD_UP),
+        "BTN_DPAD_DOWN" => Some(Key::BTN_DPAD_DOWN),
+        "BTN_DPAD_LEFT" => Some(Key::BTN_DPAD_LEFT),
+        "BTN_DPAD_RIGHT" => Some(Key::BTN_DPAD_RIGHT),
+        "BTN_TRIGGER_HAPPY1" => Some(Key::BTN_TRIGGER_HAPPY1),
+        "BTN_TRIGGER_HAPPY2" => Some(Key::BTN_TRIGGER_HAPPY2),
+        "BTN_TRIGGER_HAPPY3" => Some(Key::BTN_TRIGGER_HAPPY3),
+        "BTN_TRIGGER_HAPPY4" => Some(Key::BTN_TRIGGER_HAPPY4),
         // Add other key mappings as needed
         _ => None,
     }
@@ -58,6 +71,10 @@ pub fn axis_name_to_absolute_axis_type(name: &str) -> Option<AbsoluteAxisType> {
         "ABS_RZ" => Some(AbsoluteAxisType::ABS_RZ),
         "ABS_HAT0X" => Some(AbsoluteAxisType::ABS_HAT0X),
         "ABS_HAT0Y" => Some(AbsoluteAxisType::ABS_HAT0Y),
+        "ABS_HAT1X" => Some(AbsoluteAxisType::ABS_HAT1X),
+        "ABS_HAT1Y" => Some(AbsoluteAxisType::ABS_HAT1Y),
+        "ABS_HAT2X" => Some(AbsoluteAxisType::ABS_HAT2X),
+        "ABS_HAT2Y" => Some(AbsoluteAxisType::ABS_HAT2Y),
         "ABS_THROTTLE" => Some(AbsoluteAxisType::ABS_THROTTLE),
         "ABS_RUDDER" => Some(AbsoluteAxisType::ABS_RUDDER),
         "ABS_WHEEL" => Some(AbsoluteAxisType::ABS_WHEEL),
@@ -105,9 +122,9 @@ pub fn parse_controller_config(
                 let mut ctrl_cfg = ControllerConfig {
                     required_buttons: HashSet::new(),
                     required_axes: HashSet::new(),
-                    manual_mappings: vec![],
+                    button_mappings: vec![],
                     axis_mappings: vec![],
-                    alternate_manual_mappings: vec![],
+                    alternate_button_mappings: vec![],
                     alternate_axis_mappings: vec![],
                     modifiers: Modifiers::default(),
                     friendly_names: HashMap::new(),
@@ -129,7 +146,10 @@ pub fn parse_controller_config(
                             }
                             // also parse the mapping if present
                             if let Some(mapping) = parse_mapping(value) {
-                                ctrl_cfg.manual_mappings.push((g_input, mapping));
+                                ctrl_cfg.button_mappings.push((g_input, mapping));
+                            } else {
+                                warn!("Mapping value for button '{}' unknown or empty.", key_name);
+                                ctrl_cfg.button_mappings.push((g_input, Mapping::None));
                             }
                         }
                     }
@@ -175,6 +195,12 @@ pub fn parse_controller_config(
                                     // Parse the mapping value
                                     if let Some(mapping) = parse_mapping(value) {
                                         ctrl_cfg.axis_mappings.push((g_input, mapping));
+                                    } else {
+                                        warn!(
+                                            "Mapping value for axis '{}' unknown or empty.",
+                                            axis_key
+                                        );
+                                        ctrl_cfg.axis_mappings.push((g_input, Mapping::None));
                                     }
                                 } else {
                                     warn!(
@@ -206,7 +232,15 @@ pub fn parse_controller_config(
                                 }
                             }
                             if let Some(mapping) = parse_mapping(value) {
-                                ctrl_cfg.alternate_manual_mappings.push((g_input, mapping));
+                                ctrl_cfg.alternate_button_mappings.push((g_input, mapping));
+                            } else {
+                                warn!(
+                                    "Alternate mapping value for button '{}' unknown or empty.",
+                                    key_name
+                                );
+                                ctrl_cfg
+                                    .alternate_button_mappings
+                                    .push((g_input, Mapping::None));
                             }
                         }
                     }
@@ -247,6 +281,11 @@ pub fn parse_controller_config(
 
                                     if let Some(mapping) = parse_mapping(value) {
                                         ctrl_cfg.alternate_axis_mappings.push((g_input, mapping));
+                                    } else {
+                                        warn!("Alternate mapping value for axis '{}' unknown or empty.", axis_key);
+                                        ctrl_cfg
+                                            .alternate_axis_mappings
+                                            .push((g_input, Mapping::None));
                                     }
                                 } else {
                                     warn!(
