@@ -40,6 +40,9 @@ fn main() -> io::Result<()> {
 
     if args.show_devices {
         let hardware_devices = crate::device::get_device_ids();
+        if hardware_devices.is_empty() {
+            std::process::exit(1);
+        }
         for device in hardware_devices {
             println!(
                 "Vendor: '{}', Product: '{}', Device: '{}', Instructions: '{}'",

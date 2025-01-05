@@ -45,7 +45,7 @@ pub struct Args {
     #[arg(short, long)]
     pub test: bool,
 
-    /// Print devices defined in config files and exit
+    /// Print connected devices
     #[arg(short = 'd', long = "devices")]
     pub show_devices: bool,
 }
