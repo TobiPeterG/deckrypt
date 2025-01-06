@@ -12,9 +12,6 @@ mod keymap;
 mod types;
 
 fn main() -> io::Result<()> {
-    // Use the 'sudo' crate to escalate privileges if needed
-    sudo::escalate_if_needed().expect("Failed to escalate privileges");
-
     let args = cli::Args::parse();
 
     // Initialize the logger with the appropriate level
@@ -51,6 +48,9 @@ fn main() -> io::Result<()> {
         }
         std::process::exit(0);
     }
+
+    // Use the 'sudo' crate to escalate privileges if needed
+    sudo::escalate_if_needed().expect("Failed to escalate privileges");
 
     if args.continuously_search {
         loop {
