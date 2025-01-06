@@ -42,8 +42,8 @@ fn main() -> io::Result<()> {
         }
         for device in hardware_devices {
             println!(
-                "Vendor: '{}', Product: '{}', Device: '{}', Instructions: '{}'",
-                device.vendor, device.product, device.device, device.instructions
+                "Vendor: '{}', Product: '{}', Device: '{}', Shift: '{}', Alternate: '{}', Enter: '{}', Instructions: '{}'",
+                device.vendor, device.product, device.device, device.shift, device.alternate, device.enter, device.instructions
             )
         }
         std::process::exit(0);

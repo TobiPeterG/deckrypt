@@ -73,6 +73,9 @@ pub struct ConfigDevice {
     pub vendor: String,
     pub product: String,
     pub device: String,
+    pub shift: String,
+    pub alternate: String,
+    pub enter: String,
     pub instructions: String,
 }
 

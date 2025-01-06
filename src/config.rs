@@ -374,6 +374,14 @@ pub fn parse_controller_config(
                                     table.get("product").and_then(|v| v.as_str()).unwrap_or("");
                                 let device =
                                     table.get("device").and_then(|v| v.as_str()).unwrap_or("");
+                                let shift =
+                                    table.get("shift").and_then(|v| v.as_str()).unwrap_or("");
+                                let alternate = table
+                                    .get("alternate")
+                                    .and_then(|v| v.as_str())
+                                    .unwrap_or("");
+                                let enter =
+                                    table.get("enter").and_then(|v| v.as_str()).unwrap_or("");
                                 let instructions = table
                                     .get("instructions")
                                     .and_then(|v| v.as_str())
@@ -384,6 +392,9 @@ pub fn parse_controller_config(
                                         vendor: vendor.to_string(),
                                         product: product.to_string(),
                                         device: device.to_string(),
+                                        shift: shift.to_string(),
+                                        alternate: alternate.to_string(),
+                                        enter: enter.to_string(),
                                         instructions: instructions.to_string(),
                                     });
                                 }
