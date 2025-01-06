@@ -404,11 +404,15 @@ fn activate_mapping(
         return Ok(());
     }
     if Some(gamepad_input.clone()) == modifiers.enter_modifier {
+        let friendly_string;
         let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
+            friendly_string = format!("{} (ESCAPE)", display_name);
             Key::KEY_ESC
         } else if modifiers.shift_active || modifiers.alternate_active {
+            friendly_string = format!("{} (BACKSPACE)", display_name);
             Key::KEY_BACKSPACE
         } else {
+            friendly_string = format!("{} (ENTER)", display_name);
             Key::KEY_ENTER
         };
         press_key(
@@ -419,7 +423,7 @@ fn activate_mapping(
             gamepad_input,
         )?;
         debug!("Activated {} ({:?})", display_name, key_to_emit);
-        print_friendly_input(config, modifiers, friendly, &display_name);
+        print_friendly_input(config, modifiers, friendly, &friendly_string);
         return Ok(());
     }
 
