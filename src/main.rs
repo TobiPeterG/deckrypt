@@ -36,7 +36,7 @@ fn main() -> io::Result<()> {
     }
 
     if args.show_devices {
-        let hardware_devices = crate::device::get_device_ids();
+        let hardware_devices = crate::device::get_device_ids(&args);
         if hardware_devices.is_empty() {
             std::process::exit(1);
         }

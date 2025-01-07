@@ -1,5 +1,14 @@
 # Black Shark Green Ghost Gamepad
 
+[[devices]]
+vendor = ""
+product = ""
+device = ""
+shift = "LB (Left shoulder button)"
+alternate = "RB (Right shoulder button)"
+enter = "XBOX (green middle button)"
+instructions = ""
+
 [buttons]
 BTN_SOUTH = "a"
 BTN_EAST = "b"

@@ -387,17 +387,15 @@ pub fn parse_controller_config(
                                     .and_then(|v| v.as_str())
                                     .unwrap_or("");
                                 // Add to ctrl_cfg
-                                if !vendor.is_empty() && !product.is_empty() {
-                                    ctrl_cfg.devices.push(ConfigDevice {
-                                        vendor: vendor.to_string(),
-                                        product: product.to_string(),
-                                        device: device.to_string(),
-                                        shift: shift.to_string(),
-                                        alternate: alternate.to_string(),
-                                        enter: enter.to_string(),
-                                        instructions: instructions.to_string(),
-                                    });
-                                }
+                                ctrl_cfg.devices.push(ConfigDevice {
+                                    vendor: vendor.to_string(),
+                                    product: product.to_string(),
+                                    device: device.to_string(),
+                                    shift: shift.to_string(),
+                                    alternate: alternate.to_string(),
+                                    enter: enter.to_string(),
+                                    instructions: instructions.to_string(),
+                                });
                             }
                         }
                     }

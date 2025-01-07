@@ -66,7 +66,10 @@ pub fn scan_devices_for_config() -> (Vec<KnownDeviceUnparsed>, Vec<UnknownDevice
                                 home_str, vendor_id, product_id
                             ),
                             format!("/etc/deckrypt/{:04x}_{:04x}.toml", vendor_id, product_id),
-                            format!("/usr/share/deckrypt/{:04x}_{:04x}.toml", vendor_id, product_id),
+                            format!(
+                                "/usr/share/deckrypt/{:04x}_{:04x}.toml",
+                                vendor_id, product_id
+                            ),
                         ];
 
                         // Check if at least one config file path exists
@@ -330,7 +333,7 @@ pub fn attempt_device_selection(args: &Args) -> Option<SelectedDevice> {
     None
 }
 
-pub fn get_device_ids() -> Vec<ConfigDevice> {
+pub fn get_device_ids(args: &Args) -> Vec<ConfigDevice> {
     // We only show devices from config files that have a supported controller connected, then exit.
     // It doesn't make sense to show all devices as we still need a controller
     let (known_devices, _) = scan_devices_for_config();
@@ -355,7 +358,12 @@ pub fn get_device_ids() -> Vec<ConfigDevice> {
             None => continue,
         };
 
-        for device in valid_devices {
+        if valid_devices.is_empty() {
+            continue
+        }
+
+        if args.auto_select {
+            let device = valid_devices[0].clone();
             let parsed_cfg = match crate::config::parse_controller_config(
                 device.vendor_id,
                 device.product_id,
@@ -370,8 +378,28 @@ pub fn get_device_ids() -> Vec<ConfigDevice> {
                     continue;
                 }
             };
-            for hardware_device in parsed_cfg.devices {
-                hardware_devices.push(hardware_device);
+            hardware_devices.clear();
+            hardware_devices.push(parsed_cfg.devices[0].clone());
+            return hardware_devices
+        } else {
+            for device in valid_devices {
+                let parsed_cfg = match crate::config::parse_controller_config(
+                    device.vendor_id,
+                    device.product_id,
+                    device.config_file_path.clone(),
+                ) {
+                    Some(cfg) => cfg,
+                    None => {
+                        warn!(
+                            "Failed to parse config for device {} ({})",
+                            device.name, device.config_file_path
+                        );
+                        continue;
+                    }
+                };
+                for hardware_device in parsed_cfg.devices {
+                    hardware_devices.push(hardware_device);
+                }
             }
         }
     }
