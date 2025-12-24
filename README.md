@@ -223,11 +223,12 @@ Ensure that the following dependencies are installed on your system:
 - **Dracut:** For initramfs generation.
 - **Cargo-Packaging:** For packaging the Rust application.
 - **kbd-devel:** For creating the kernel keymap
+- **libxkbcommon-devel:** For creating the wayland keymap
 
 On openSUSE, you can install the necessary dependencies using zypper:
 
 ```bash
-sudo zypper install cargo cargo-packaging rust libevdev-devel kbd-devel pkgconfig dracut
+sudo zypper install cargo cargo-packaging rust libevdev-devel kbd-devel pkgconfig dracut libxkbcommon-devel
 ```
 
 ### Building from Source
