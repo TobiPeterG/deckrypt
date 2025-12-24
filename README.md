@@ -1,8 +1,6 @@
 # Deckrypt
 
-Unlock a LUKS-encrypted root partition with game controller combinations.
-
-Deckrypt is designed for users who desire full disk encryption on devices like the Steam Deck.
+Translate game controller inputs into keyboard events.
 
 Deckrypt is designed for users who desire full disk encryption on devices like the Steam Deck. It leverages a Rust-based application to translate game controller inputs into keyboard events, enabling the unlocking of encrypted partitions through specific controller combinations or traditional password entry.
 
@@ -119,11 +117,11 @@ Multiple combinations can be chained together to form a secure unlocking sequenc
 
 ### The Enter key
 
-Since it is not only necessary to enter a sequence, but we also need to communicate that the sequence is complete, we need to have the possibility to press the `Enter` key. It is equally useful to have a way to remove the last character, a way to emit  ESC would also be nice. To realize this, Deckrypt supports the special mapping `ENTER`, which can be assigned to a button in normal mode. If this is set, the behavior of this button differs from the other assignments as follows:
+Since it is not only necessary to enter a sequence, but we also need to communicate that the sequence is complete, we need to have the possibility to press the `Enter` key. It is equally useful to have a way to remove the last character and it is useful to stop deckrypt again. To realize this, Deckrypt supports the special mapping `ENTER`, which can be assigned to a button in normal mode. If this is set, the behavior of this button differs from the other assignments as follows:
 
 1. If this button is pressed **WITHOUT** a modifier key, an `ENTER` is emitted.
 2. If the key is pressed with **ONE** of the modifier keys, a `BACKSPACE` is emitted, which removes the last character entered.
-3. If the key is pressed with **BOTH** modifier keys, an `ESC` is emitted.
+3. If the key is pressed with **BOTH** modifier keys, deckrypt is stopped.
 
 This special behavior also means that a manual assignment for the alternate mode of this key is not possible and any manual assignment will be ignored.
 
