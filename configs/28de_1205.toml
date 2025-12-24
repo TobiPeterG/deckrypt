@@ -7,7 +7,7 @@ device = "Steam Deck (LCD)"
 shift = "LB (Left shoulder button)"
 alternate = "RB (Right shoulder button)"
 enter = "Start (≡)"
-instructions = "To switch the Steam Deck from \"keyboard/mouse\" to \"gamepad\" mode when asked to enter the password,\\nplease long-press the \"Start\" (≡) button until you hear a peep sound.\\nTo switch back to \"keyboard/mouse\" mode,\\nrepeat the process."
+instructions = ""
 
 [buttons]
 BTN_SOUTH = "a"

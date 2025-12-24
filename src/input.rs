@@ -8,7 +8,7 @@ use log::{debug, error, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::io;
 
-use crate::keymap::{generate_chrmap, shift_transform, ALLOWED_CHARACTERS};
+use crate::keymap::{generate_chrmap_auto, shift_transform, ALLOWED_CHARACTERS};
 use crate::types::{
     Action, BuiltMappings, ControllerConfig, Direction, GamepadInput, Mapping, Modifiers,
     PressedMapping, SelectedDevice,
@@ -404,11 +404,16 @@ fn activate_mapping(
         return Ok(());
     }
     if Some(gamepad_input.clone()) == modifiers.enter_modifier {
+        // Shift + Alternate + Enter quits deckrypt.
+        if modifiers.shift_active && modifiers.alternate_active {
+            let friendly_string = format!("{} (QUIT)", display_name);
+            print_friendly_input(config, modifiers, friendly, &friendly_string);
+            debug!("Quit combo pressed: SHIFT + ALTERNATE + ENTER -> exiting.");
+            std::process::exit(0);
+        }
+
         let friendly_string;
-        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
-            friendly_string = format!("{} (ESCAPE)", display_name);
-            Key::KEY_ESC
-        } else if modifiers.shift_active || modifiers.alternate_active {
+        let key_to_emit = if modifiers.shift_active || modifiers.alternate_active {
             friendly_string = format!("{} (BACKSPACE)", display_name);
             Key::KEY_BACKSPACE
         } else {
@@ -491,9 +496,8 @@ fn release_mapping(
         return Ok(());
     }
     if Some(gamepad_input.clone()) == modifiers.enter_modifier {
-        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
-            Key::KEY_ESC
-        } else if modifiers.shift_active || modifiers.alternate_active {
+        // If the quit combo was used, the process already exited in activate_mapping().
+        let key_to_emit = if modifiers.shift_active || modifiers.alternate_active {
             Key::KEY_BACKSPACE
         } else {
             Key::KEY_ENTER
@@ -573,7 +577,7 @@ fn handle_device(
     });
 
     // Generate character maps
-    let chrmap = match generate_chrmap() {
+    let chrmap = match generate_chrmap_auto() {
         Some(maps) => maps,
         None => {
             error!("Failed to generate character map.");
@@ -738,6 +742,10 @@ pub fn run_main_loop(args: &crate::cli::Args) -> std::io::Result<()> {
             ));
         }
     };
+
+    // Apply device-specific quirks (e.g. Steam Deck lizard-mode disable)
+    // Keep the returned guard alive for as long as the main loop runs.
+    let _quirk_guard = crate::quirks::apply_for_selected_device(&selection);
 
     match selection {
         // User wants an unknown device => create ephemeral config & proceed
