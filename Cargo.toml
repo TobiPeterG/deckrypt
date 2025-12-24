@@ -1,6 +1,6 @@
 [package]
 name = "deckrypt"
-version = "0.4.4"
+version = "0.5.0"
 edition = "2021"
 links = "keymap"
 
@@ -10,6 +10,7 @@ links = "keymap"
 clap = { version = "4.5.23", features = ["derive"] }
 env_logger = "0.11.6"
 evdev = "0.12.2"
+hidapi = "2.6.4"
 libc = "0.2.169"
 log = "0.4.22"
 sudo = "0.6.0"

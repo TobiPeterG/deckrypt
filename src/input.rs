@@ -739,6 +739,10 @@ pub fn run_main_loop(args: &crate::cli::Args) -> std::io::Result<()> {
         }
     };
 
+    // Apply device-specific quirks (e.g. Steam Deck lizard-mode disable)
+    // Keep the returned guard alive for as long as the main loop runs.
+    let _quirk_guard = crate::quirks::apply_for_selected_device(&selection);
+
     match selection {
         // User wants an unknown device => create ephemeral config & proceed
         // We ALWAYS do auto mapping for unknown devices, ignoring `-m`.

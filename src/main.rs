@@ -1,4 +1,3 @@
-// main.rs
 use clap::Parser;
 use log::{debug, error, info, warn};
 use std::io;
@@ -10,6 +9,7 @@ mod device;
 mod input;
 mod keymap;
 mod types;
+mod quirks;
 
 fn main() -> io::Result<()> {
     let args = cli::Args::parse();
