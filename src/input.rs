@@ -8,7 +8,7 @@ use log::{debug, error, trace, warn};
 use std::collections::{HashMap, HashSet};
 use std::io;
 
-use crate::keymap::{generate_chrmap, shift_transform, ALLOWED_CHARACTERS};
+use crate::keymap::{generate_chrmap_auto, shift_transform, ALLOWED_CHARACTERS};
 use crate::types::{
     Action, BuiltMappings, ControllerConfig, Direction, GamepadInput, Mapping, Modifiers,
     PressedMapping, SelectedDevice,
@@ -573,7 +573,7 @@ fn handle_device(
     });
 
     // Generate character maps
-    let chrmap = match generate_chrmap() {
+    let chrmap = match generate_chrmap_auto() {
         Some(maps) => maps,
         None => {
             error!("Failed to generate character map.");

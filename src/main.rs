@@ -1,15 +1,14 @@
 use clap::Parser;
 use log::{debug, error, info, warn};
 use std::io;
-use sudo;
 
 mod cli;
 mod config;
 mod device;
 mod input;
 mod keymap;
-mod types;
 mod quirks;
+mod types;
 
 fn main() -> io::Result<()> {
     let args = cli::Args::parse();
@@ -48,9 +47,6 @@ fn main() -> io::Result<()> {
         }
         std::process::exit(0);
     }
-
-    // Use the 'sudo' crate to escalate privileges if needed
-    sudo::escalate_if_needed().expect("Failed to escalate privileges");
 
     if args.continuously_search {
         loop {
