@@ -404,11 +404,16 @@ fn activate_mapping(
         return Ok(());
     }
     if Some(gamepad_input.clone()) == modifiers.enter_modifier {
+        // Shift + Alternate + Enter quits deckrypt.
+        if modifiers.shift_active && modifiers.alternate_active {
+            let friendly_string = format!("{} (QUIT)", display_name);
+            print_friendly_input(config, modifiers, friendly, &friendly_string);
+            debug!("Quit combo pressed: SHIFT + ALTERNATE + ENTER -> exiting.");
+            std::process::exit(0);
+        }
+
         let friendly_string;
-        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
-            friendly_string = format!("{} (ESCAPE)", display_name);
-            Key::KEY_ESC
-        } else if modifiers.shift_active || modifiers.alternate_active {
+        let key_to_emit = if modifiers.shift_active || modifiers.alternate_active {
             friendly_string = format!("{} (BACKSPACE)", display_name);
             Key::KEY_BACKSPACE
         } else {
@@ -491,9 +496,8 @@ fn release_mapping(
         return Ok(());
     }
     if Some(gamepad_input.clone()) == modifiers.enter_modifier {
-        let key_to_emit = if modifiers.shift_active && modifiers.alternate_active {
-            Key::KEY_ESC
-        } else if modifiers.shift_active || modifiers.alternate_active {
+        // If the quit combo was used, the process already exited in activate_mapping().
+        let key_to_emit = if modifiers.shift_active || modifiers.alternate_active {
             Key::KEY_BACKSPACE
         } else {
             Key::KEY_ENTER
