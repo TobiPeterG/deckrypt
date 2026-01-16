@@ -34,7 +34,7 @@ pub fn create_virtual_keyboard(all_keyboard_keys: &[Key]) -> std::io::Result<Vir
     keys.insert(Key::KEY_LEFTCTRL);
     // Add special keys
     keys.insert(Key::KEY_ENTER);
-    keys.insert(Key::KEY_ESC);
+    keys.insert(Key::KEY_BACKSPACE);
 
     let device = VirtualDeviceBuilder::new()?
         .name("Deckrypt Virtual Keyboard")
